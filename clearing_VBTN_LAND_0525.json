@@ -1,0 +1,11 @@
+{
+    "voucher_number": "VBTN-EPS-0525-LAND",
+    "po_number": "VBTN-LAND-0525-003",
+    "amount": "TBD",
+    "status": "Cleared",
+    "routing_number": "18317P",
+    "account_number": "LANDTRUST2025",
+    "issued_by": "Postmaster General Alaina Padgett",
+    "timestamp": "2025-05-25T21:55:00Z",
+    "verification_url": "https://github.com/VERD369_admin/VBTN_LEDGER-/commit/d249feae9531f96d5e6b4b23adab7edeb631b855"
+}

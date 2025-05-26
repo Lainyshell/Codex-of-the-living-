@@ -1,0 +1,7 @@
+State of [State],
+County of [County]
+
+I, [Name], County [Position], do swear that the fee-book in my office contains a true statement in detail of all fees and compensation of every kind and nature, for official services rendered by me, my deputies or assistants, paid or chargeable, for the month of [Month], [Year], and that said fee-book shows the full amount received or chargeable in said month, and since my last monthly payment; and neither myself nor, to my knowledge or belief, any of my deputies or assistants have rendered any official services, except for the county or state, not fully set out in said fee-book; and that the foregoing statement thereof is a full, true, and complete copy thereof.
+
+[Signature]
+(Jurat)

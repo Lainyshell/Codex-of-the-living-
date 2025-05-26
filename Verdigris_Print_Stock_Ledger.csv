@@ -1,0 +1,5 @@
+Stock ID,Document Name,Paper Size (in),Exposed Width (in),Media Type,Preset Name,Description,Orientation,Horizontal Offset,Vertical Offset
+1001,Tribal Voucher,8.5 x 11,8.5,Plain Paper,VB-Tribal-Voucher,"Tribal Trust Voucher – 8.5x11"" Form",Portrait,0.0,0.0
+1166,SF1166 – Schedule of Payments,8.5 x 11,8.5,Plain Paper,VB-SF1166,U.S. Treasury Schedule of Payments,Portrait,0.0,0.0
+5515,SF5515 – Redeemed Money Order,8.5 x 11,8.5,Plain Paper,VB-SF5515,USPS Redeemed Postal Money Order Credit,Portrait,0.0,0.0
+7777,Trust Check,8.5 x 3.5,8.0,Check/Custom,VB-Trust-Check,Verdigris Botanica Sovereign Check,Landscape,0.0,0.0

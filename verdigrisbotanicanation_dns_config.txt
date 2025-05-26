@@ -1,0 +1,21 @@
+
+; DNS Configuration for verdigrisbotanicanation.gov
+; Google Workspace MX, SPF, and basic A record setup
+
+@   IN  A       199.33.230.1
+
+; MX Records
+@   IN  MX  1   ASPMX.L.GOOGLE.COM.
+@   IN  MX  5   ALT1.ASPMX.L.GOOGLE.COM.
+@   IN  MX  5   ALT2.ASPMX.L.GOOGLE.COM.
+@   IN  MX  10  ALT3.ASPMX.L.GOOGLE.COM.
+@   IN  MX  10  ALT4.ASPMX.L.GOOGLE.COM.
+
+; SPF Record
+@   IN  TXT     "v=spf1 include:_spf.google.com ~all"
+
+; DMARC Record (Optional)
+_dmarc  IN  TXT     "v=DMARC1; p=none; rua=mailto:dmarc@verdigrisbotanicanation.gov"
+
+; DKIM Record (Placeholder - to be updated after generating in Google Admin)
+google._domainkey IN TXT "v=DKIM1; k=rsa; p=YOUR_DKIM_PUBLIC_KEY_HERE"

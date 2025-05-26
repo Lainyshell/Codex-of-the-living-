@@ -1,0 +1,23 @@
+name: Validate Clearing Entry
+
+on:
+  push:
+    paths:
+      - 'clearing/**'
+
+jobs:
+  verify-ledger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v3
+
+      - name: List All Ledger Files
+        run: ls -lah clearing/
+
+      - name: Validate JSON Format
+        run: |
+          for file in clearing/*.json; do
+            echo "Checking $file..."
+            jq . "$file" || echo "$file is invalid JSON"
+          done

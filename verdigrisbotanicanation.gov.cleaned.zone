@@ -1,0 +1,41 @@
+
+;; Zone file for verdigrisbotanicanation.gov
+;; Generated: 2025-05-18 08:05:19 UTC
+;; Managed via Cloudflare - upload or copy to DNS provider as needed
+
+$TTL 3600
+@       IN  SOA melissa.ns.cloudflare.com. dns.cloudflare.com. (
+                2049894921 ; serial
+                10000       ; refresh
+                2400        ; retry
+                604800      ; expire
+                3600 )      ; minimum
+
+; Nameservers
+@       IN  NS  melissa.ns.cloudflare.com.
+@       IN  NS  rustam.ns.cloudflare.com.
+
+; A Records
+@       IN  A   199.33.230.1
+www     IN  CNAME verdigrisbotanicanation.gov.
+
+; MX Records (Google Workspace example)
+@       IN  MX  1 ASPMX.L.GOOGLE.COM.
+@       IN  MX  5 ALT1.ASPMX.L.GOOGLE.COM.
+@       IN  MX  5 ALT2.ASPMX.L.GOOGLE.COM.
+@       IN  MX 10 ALT3.ASPMX.L.GOOGLE.COM.
+@       IN  MX 10 ALT4.ASPMX.L.GOOGLE.COM.
+
+; SPF Record
+@       IN  TXT "v=spf1 include:_spf.google.com ~all"
+
+; DKIM Record (Insert your actual key in place of 'YOUR_DKIM_PUBLIC_KEY')
+google._domainkey IN TXT "v=DKIM1; k=rsa; p=YOUR_DKIM_PUBLIC_KEY"
+
+; DMARC Policy
+_dmarc  IN  TXT "v=DMARC1; p=reject; sp=reject; adkim=s; aspf=s; rua=mailto:dmarc@verdigrisbotanicanation.gov"
+
+; Optional Verification Records (keep if in use)
+@       IN  TXT "openai-domain-verification=dv-mjjMTrFCW1Dd95JdDpadBGGv"
+@       IN  TXT "google-site-verification=EYOusNIzEvfXj-sWLJQR1YBIJqssZjv6sUDaK8B9fqI"
+@       IN  TXT "apple-domain=QMoXjs7cHaardAAd"
