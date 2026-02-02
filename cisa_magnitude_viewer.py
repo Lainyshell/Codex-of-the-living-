@@ -38,7 +38,6 @@ def display_magnitude_dashboard(transmission_log_file: str):
     
     # Calculate totals
     total_transmissions = len(transmissions)
-    assessment_types = {}
     data_transferred = 0
     
     print(f"📊 MAGNITUDE SUMMARY")
