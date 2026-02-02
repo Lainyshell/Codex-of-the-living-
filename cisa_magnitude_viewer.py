@@ -38,7 +38,6 @@ def display_magnitude_dashboard(transmission_log_file: str):
     
     # Calculate totals
     total_transmissions = len(transmissions)
-    total_findings = 0
     severity_totals = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
     assessment_types = {}
     data_transferred = 0
