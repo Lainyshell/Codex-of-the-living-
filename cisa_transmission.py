@@ -169,18 +169,20 @@ class SecureTransmitter:
         
         return all(field in encrypted_payload for field in required_fields)
     
-    def decrypt_data(self, encrypted_payload: Dict[str, str]) -> bytes:
+    def decrypt_data(self, encrypted_payload: Dict[str, str], decryption_key: bytes) -> bytes:
         """
-        Decrypt data (for verification purposes only)
-        In production, only CISA would have the decryption key
+        Decrypt data for verification or receiver-side processing.
+
+        NOTE: This method is intended for testing or CISA-side use only.
+        The caller must explicitly provide the decryption_key; in production
+        deployments, the sender MUST NOT have access to this key.
         """
         try:
             ciphertext = base64.b64decode(encrypted_payload["ciphertext"])
             nonce = base64.b64decode(encrypted_payload["nonce"])
-            
-            aesgcm = AESGCM(self.encryption_key)
+
+            aesgcm = AESGCM(decryption_key)
             plaintext = aesgcm.decrypt(nonce, ciphertext, None)
-            
             return plaintext
         except Exception as e:
             raise CISATransmissionError(f"Decryption failed: {str(e)}")
