@@ -2,7 +2,8 @@
   "cisa_endpoints": {
     "primary": "https://cisa.gov/tribal-data-intake",
     "backup": "https://backup.cisa.gov/tribal-intake",
-    "emergency": "https://emergency.cisa.gov/intake"
+    "emergency": "https://emergency.cisa.gov/intake",
+    "documentation": "These CISA endpoint URLs are placeholders and not real CISA endpoints. Before production use, replace them with actual CISA API endpoints and ensure a configuration validation step verifies that the configured endpoints are reachable and correct."
   },
   "encryption": {
     "algorithm": "AES-256-GCM",
