@@ -24,6 +24,8 @@ COPY . /app
 # Make port 5000 available to the world outside this container
 EXPOSE 5000
 
+# Run as non-root user for security
+USER nobody
+
 # Run main when the container launches
 ENTRYPOINT ["uwsgi", "--http", "0.0.0.0:5000", "--master", "-p", "2", "-w", "main:app"]
-USER nobody
