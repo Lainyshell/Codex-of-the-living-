@@ -91,7 +91,7 @@ def main():
     print("Step 5: Encrypting assessment data...")
     
     # Prepare encrypted package
-    security_package = transmitter.prepare_transmission_package(
+    transmitter.prepare_transmission_package(
         security_results,
         metadata={"assessment_type": "security"}
     )
