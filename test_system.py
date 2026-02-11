@@ -204,7 +204,7 @@ def test_integrated_workflow():
     
     # Transmit
     package = transmitter.prepare_transmission_package(shareable_results)
-    result = transmitter.simulate_transmission(package)
+    transmitter.simulate_transmission(package)
     print("  ✓ Transmitted to CISA")
     
     # Log
