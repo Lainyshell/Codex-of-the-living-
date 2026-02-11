@@ -29,11 +29,17 @@ echo ""
 # Navigate to the app directory
 cd app
 
+# Check if requirements.txt exists
+if [ ! -f "requirements.txt" ]; then
+    echo "Error: requirements.txt not found in app directory."
+    exit 1
+fi
+
 # Check if requirements are installed
 echo "Checking dependencies..."
 if ! python3 -c "import flask" 2>/dev/null; then
     echo "Installing required dependencies..."
-    pip install -r requirements.txt
+    pip3 install -r requirements.txt
 else
     echo "Dependencies already installed."
 fi
