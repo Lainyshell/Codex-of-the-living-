@@ -5,7 +5,6 @@ Validates core functionality and security features
 """
 
 import json
-import os
 import sys
 from pathlib import Path
 
