@@ -8,7 +8,7 @@ import json
 import hashlib
 import os
 from datetime import datetime
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 from pathlib import Path
 
 
