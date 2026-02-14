@@ -33,6 +33,19 @@ The application connects to the official U.S. Treasury Fiscal Data API:
 
 ## Running Locally
 
+### Quick Start with Run Script
+
+The easiest way to run the application:
+
+```bash
+./run.sh
+```
+
+This script will:
+- Check dependencies and install them if needed
+- Start the Flask application on port 5000
+- Display available endpoints
+
 ### With Docker Compose
 
 ```bash
