@@ -47,32 +47,15 @@ jobs:
           fetch-depth: 0
 
       # ------------------------------------------------------------------
-      # Step 1: Detect changed files
+      # Step 1: Detect changed files (removed)
+      # NOTE: This step previously computed a list of changed files and
+      #       exposed it as an output (`changed_files`), but that output
+      #       was never consumed by later steps. To avoid unused-output
+      #       warnings from static analysis and keep the workflow simpler,
+      #       the implementation of this step has been removed.
+      #       The sensitive data and naming checks continue to scan all
+      #       committed files, preserving existing behavior.
       # ------------------------------------------------------------------
-      - name: Detect Changed Files
-        id: changed-files
-        run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            BASE_SHA="${{ github.event.pull_request.base.sha }}"
-            HEAD_SHA="${{ github.event.pull_request.head.sha }}"
-          else
-            BASE_SHA="${{ github.event.before }}"
-            HEAD_SHA="${{ github.sha }}"
-          fi
-
-          if git rev-parse --verify "$BASE_SHA" >/dev/null 2>&1 && \
-             git rev-parse --verify "$HEAD_SHA" >/dev/null 2>&1; then
-            CHANGED=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" 2>/dev/null || echo "")
-          else
-            CHANGED=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || git ls-files)
-          fi
-
-          echo "Changed files:"
-          echo "$CHANGED"
-          echo "changed_files<<EOF" >> "$GITHUB_OUTPUT"
-          echo "$CHANGED" >> "$GITHUB_OUTPUT"
-          echo "EOF" >> "$GITHUB_OUTPUT"
-
       # ------------------------------------------------------------------
       # Step 2: Scan for accidentally committed sensitive data
       # (PII patterns, credentials, private keys)
