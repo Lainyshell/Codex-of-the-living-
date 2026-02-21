@@ -106,6 +106,16 @@ For VBTN M365 environment security, refer to these documents for best practices 
 
 ---
 
+## Hardware Inventory
+
+### Barcode Scanner
+
+VBTN uses a USB HID barcode scanner (Symbol Technologies / Motorola Solutions, VID_05E0&PID_1200) operating in keyboard-emulation mode. Full device and driver configuration details are documented in:
+
+- **[VBTN Barcode Scanner Configuration](VBTN_Barcode_Scanner_Config.md)** — device IDs, driver info, operating mode, and usage notes.
+
+---
+
 ## Repository Contents
 
 This repository contains:
@@ -114,3 +124,4 @@ This repository contains:
 - M365 DNS configuration for VBTN services
 - Cybersecurity compliance documentation
 - Operational procedures and templates
+- Hardware inventory (barcode scanner configuration)
