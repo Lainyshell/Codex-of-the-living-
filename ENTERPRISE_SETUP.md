@@ -52,9 +52,9 @@ Configure GitHub Enterprise SAML SSO to authenticate against the VBTN Microsoft 
 1. In **Azure Portal → Entra ID → Enterprise Applications**, create a new app:
    - Template: **GitHub Enterprise Cloud – Organization**
 2. Configure **Single Sign-On** with SAML:
-   - **Identifier (Entity ID)**: `https://github.com/orgs/<org-name>`
-   - **Reply URL**: `https://github.com/orgs/<org-name>/saml/consume`
-   - **Sign-on URL**: `https://github.com/orgs/<org-name>/sso`
+   - **Identifier (Entity ID)**: `https://github.com/orgs/Lainyshell`
+   - **Reply URL**: `https://github.com/orgs/Lainyshell/saml/consume`
+   - **Sign-on URL**: `https://github.com/orgs/Lainyshell/sso`
 3. Map Entra ID user attributes:
    - `user.userprincipalname` → `NameID`
    - `user.displayname` → `full_name`
