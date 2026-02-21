@@ -97,7 +97,7 @@ jobs:
           )
 
           for pattern in "${PATTERNS[@]}"; do
-            MATCHES=$(git ls-files | xargs grep -rl --include="*.py" \
+            MATCHES=$(git ls-files | xargs grep -rIl --include="*.py" \
               --include="*.js" --include="*.ts" --include="*.json" \
               --include="*.yaml" --include="*.yml" --include="*.env" \
               -E "$pattern" 2>/dev/null || true)
