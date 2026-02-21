@@ -1,0 +1,300 @@
+name: VBTN Compliance Check
+
+# -----------------------------------------------------------------------
+# Verdigris Botanica Tribal Nation — Document Hygiene & Compliance Workflow
+# Authority: Alaina Padgett (alaina@verdigrisbotanicanation.org)
+#
+# This workflow enforces the VBTN "Compliance Door" — automated checks that
+# run on every push and pull request. It validates document hygiene, scans
+# for inadvertently committed sensitive data, and generates an audit record.
+#
+# HUMAN-IN-THE-LOOP: This workflow only performs read/check operations.
+# It does NOT route documents to DocuSign or publish any content without
+# explicit admin approval (see docs/AUTOMATION_GUIDE.md).
+# -----------------------------------------------------------------------
+
+on:
+  push:
+    branches:
+      - main
+      - 'copilot/**'
+  pull_request:
+    branches:
+      - main
+  repository_dispatch:
+    types:
+      - compliance-review
+  workflow_dispatch:
+    inputs:
+      document_name:
+        description: 'Document name to review (optional)'
+        required: false
+        default: ''
+
+jobs:
+  compliance-check:
+    name: Document Hygiene & Compliance Check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # ------------------------------------------------------------------
+      # Step 1: Detect changed files
+      # ------------------------------------------------------------------
+      - name: Detect Changed Files
+        id: changed-files
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE_SHA="${{ github.event.pull_request.base.sha }}"
+            HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          else
+            BASE_SHA="${{ github.event.before }}"
+            HEAD_SHA="${{ github.sha }}"
+          fi
+
+          if git rev-parse --verify "$BASE_SHA" >/dev/null 2>&1 && \
+             git rev-parse --verify "$HEAD_SHA" >/dev/null 2>&1; then
+            CHANGED=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" 2>/dev/null || echo "")
+          else
+            CHANGED=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || git ls-files)
+          fi
+
+          echo "Changed files:"
+          echo "$CHANGED"
+          echo "changed_files<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$CHANGED" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      # ------------------------------------------------------------------
+      # Step 2: Scan for accidentally committed sensitive data
+      # (PII patterns, credentials, private keys)
+      # ------------------------------------------------------------------
+      - name: Sensitive Data Scan
+        id: sensitive-scan
+        run: |
+          set +e
+
+          REPORT=""
+          FAILURES=0
+
+          echo "=== VBTN Sensitive Data Scan ==="
+
+          # Patterns to flag (informational — does not block push for existing files)
+          PATTERNS=(
+            "BEGIN (RSA|EC|OPENSSH) PRIVATE KEY"
+            "AKIA[0-9A-Z]{16}"
+            "-----BEGIN CERTIFICATE-----"
+            "password\s*[:=]\s*['\"][^'\"]{8,}"
+            "secret\s*[:=]\s*['\"][^'\"]{8,}"
+            "api[_-]?key\s*[:=]\s*['\"][^'\"]{8,}"
+          )
+
+          for pattern in "${PATTERNS[@]}"; do
+            MATCHES=$(git ls-files | xargs grep -rl --include="*.py" \
+              --include="*.js" --include="*.ts" --include="*.json" \
+              --include="*.yaml" --include="*.yml" --include="*.env" \
+              -E "$pattern" 2>/dev/null || true)
+            if [ -n "$MATCHES" ]; then
+              echo "⚠️  Potential sensitive data pattern found: $pattern"
+              echo "   Files: $MATCHES"
+              REPORT="$REPORT\n⚠️ Pattern '$pattern' found in: $MATCHES"
+              FAILURES=$((FAILURES + 1))
+            fi
+          done
+
+          if [ "$FAILURES" -eq 0 ]; then
+            echo "✅ No sensitive data patterns detected."
+            REPORT="✅ No sensitive data patterns detected."
+          fi
+
+          echo "scan_report<<EOF" >> "$GITHUB_OUTPUT"
+          echo -e "$REPORT" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+          echo "scan_failures=$FAILURES" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      # ------------------------------------------------------------------
+      # Step 3: Document naming convention check
+      # ------------------------------------------------------------------
+      - name: Document Naming Convention Check
+        id: naming-check
+        run: |
+          set +e
+
+          REPORT=""
+          WARNINGS=0
+
+          echo "=== Document Naming Convention Check ==="
+
+          # Check top-level documents (PDFs, Word, Excel, CSV)
+          while IFS= read -r -d '' f; do
+            filename=$(basename "$f")
+            # Flag files with spaces (should use underscores or hyphens)
+            if echo "$filename" | grep -q ' '; then
+              echo "⚠️  Filename contains spaces: $filename"
+              REPORT="$REPORT\n⚠️ Filename contains spaces: $filename"
+              WARNINGS=$((WARNINGS + 1))
+            fi
+            # Flag extremely long filenames
+            if [ ${#filename} -gt 100 ]; then
+              echo "⚠️  Filename too long (>100 chars): $filename"
+              REPORT="$REPORT\n⚠️ Filename too long: $filename"
+              WARNINGS=$((WARNINGS + 1))
+            fi
+          done < <(find . -maxdepth 1 \( -name "*.pdf" -o -name "*.docx" \
+            -o -name "*.xlsx" -o -name "*.csv" -o -name "*.txt" \) \
+            -print0 2>/dev/null)
+
+          if [ "$WARNINGS" -eq 0 ]; then
+            echo "✅ All checked documents pass naming conventions."
+            REPORT="✅ All checked documents pass naming conventions."
+          fi
+
+          echo "naming_report<<EOF" >> "$GITHUB_OUTPUT"
+          echo -e "$REPORT" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+          echo "naming_warnings=$WARNINGS" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      # ------------------------------------------------------------------
+      # Step 4: Compute document hashes for integrity tracking
+      # ------------------------------------------------------------------
+      - name: Document Integrity Hashes
+        id: doc-hashes
+        run: |
+          echo "=== Document Integrity Hashes ==="
+          HASH_REPORT=""
+          while IFS= read -r -d '' f; do
+            rel="${f#./}"
+            hash=$(sha256sum "$f" | awk '{print $1}')
+            echo "  $hash  $rel"
+            HASH_REPORT="$HASH_REPORT\n$hash  $rel"
+          done < <(find . -maxdepth 2 \
+            \( -name "*.pdf" -o -name "*.docx" -o -name "*.xlsx" \
+               -o -name "*.csv" -o -name "*.md" \) \
+            -not -path "./.git/*" -print0 2>/dev/null)
+
+          echo "hash_report<<EOF" >> "$GITHUB_OUTPUT"
+          echo -e "$HASH_REPORT" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      # ------------------------------------------------------------------
+      # Step 5: Generate compliance summary and post to PR (if applicable)
+      # ------------------------------------------------------------------
+      - name: Generate Compliance Summary
+        id: summary
+        run: |
+          TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          SHA="${{ github.sha }}"
+          ACTOR="${{ github.actor }}"
+          REF="${{ github.ref_name }}"
+          EVENT="${{ github.event_name }}"
+
+          SCAN_FAILURES="${{ steps.sensitive-scan.outputs.scan_failures }}"
+          NAMING_WARNINGS="${{ steps.naming-check.outputs.naming_warnings }}"
+
+          if [ "$SCAN_FAILURES" -eq 0 ] && [ "$NAMING_WARNINGS" -eq 0 ]; then
+            OVERALL="✅ PASSED"
+          elif [ "$SCAN_FAILURES" -gt 0 ]; then
+            OVERALL="❌ FAILED — Sensitive data scan found issues"
+          else
+            OVERALL="⚠️  PASSED WITH WARNINGS"
+          fi
+
+          cat >> "$GITHUB_STEP_SUMMARY" <<SUMMARY
+          # 🏛️ VBTN Compliance Check Report
+
+          **Overall Status**: $OVERALL
+
+          | Field | Value |
+          |-------|-------|
+          | **Timestamp** | $TIMESTAMP |
+          | **Commit** | $SHA |
+          | **Branch** | $REF |
+          | **Triggered by** | $ACTOR |
+          | **Event** | $EVENT |
+
+          ## Sensitive Data Scan
+          ${{ steps.sensitive-scan.outputs.scan_report }}
+
+          ## Naming Convention Check
+          ${{ steps.naming-check.outputs.naming_report }}
+
+          ## Document Integrity Hashes
+          \`\`\`
+          ${{ steps.doc-hashes.outputs.hash_report }}
+          \`\`\`
+
+          ---
+          *⚠️ HUMAN-IN-THE-LOOP REQUIRED: This automated check does not route, sign,
+          or publish any documents. Admin approval is required for all next steps.*
+
+          *Verdigris Botanica Tribal Nation — Compliance Door*  
+          *Admin: alaina@verdigrisbotanicanation.org*
+          SUMMARY
+
+          echo "overall_status=$OVERALL" >> "$GITHUB_OUTPUT"
+
+      # ------------------------------------------------------------------
+      # Step 6: Post comment to PR with compliance summary
+      # ------------------------------------------------------------------
+      - name: Post Compliance Summary to PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const scanFailures = parseInt('${{ steps.sensitive-scan.outputs.scan_failures }}') || 0;
+            const namingWarnings = parseInt('${{ steps.naming-check.outputs.naming_warnings }}') || 0;
+
+            let overall = '✅ **PASSED**';
+            if (scanFailures > 0) {
+              overall = '❌ **FAILED** — Sensitive data scan found issues requiring remediation';
+            } else if (namingWarnings > 0) {
+              overall = '⚠️ **PASSED WITH WARNINGS** — Review naming convention warnings';
+            }
+
+            const body = [
+              '## 🏛️ VBTN Compliance Check',
+              '',
+              `**Overall Status**: ${overall}`,
+              '',
+              '| Check | Result |',
+              '|-------|--------|',
+              `| Sensitive Data Scan | ${scanFailures === 0 ? '✅ No issues' : '❌ ' + scanFailures + ' issue(s) found'} |`,
+              `| Naming Conventions | ${namingWarnings === 0 ? '✅ No issues' : '⚠️ ' + namingWarnings + ' warning(s)'} |`,
+              `| Document Hashes | ✅ Computed |`,
+              '',
+              '> ⚠️ **Human-in-the-Loop Required**: This automated check does not route, sign, or',
+              '> publish any documents. The Tribal Administrator must review and explicitly approve',
+              '> all next steps before any action is taken.',
+              '',
+              '*Verdigris Botanica Tribal Nation — Compliance Door*'
+            ].join('\n');
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
+
+      # ------------------------------------------------------------------
+      # Step 7: Fail the workflow if sensitive data was found
+      # ------------------------------------------------------------------
+      - name: Enforce Compliance Gate
+        run: |
+          SCAN_FAILURES="${{ steps.sensitive-scan.outputs.scan_failures }}"
+          if [ "$SCAN_FAILURES" -gt 0 ]; then
+            echo "❌ Compliance check FAILED: Sensitive data patterns detected."
+            echo "Please remove sensitive data and re-push."
+            exit 1
+          fi
+          echo "✅ Compliance check passed. Awaiting human review for any next steps."
