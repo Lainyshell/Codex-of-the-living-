@@ -1,0 +1,46 @@
+{
+  "organization": {
+    "name": "Verdigris Botanica Tribal Nation",
+    "return_address": {
+      "line1": "728 Crescent Way",
+      "city": "Radcliff",
+      "state": "KY",
+      "zip": "40160-2618"
+    },
+    "finance_phone": "6614930000"
+  },
+  "usps": {
+    "master_mid": "903640920",
+    "fedstrip": "18317P",
+    "permit": {
+      "permit_number": "18317P",
+      "permit_city": "",
+      "permit_state": "",
+      "mail_class_marking": "FIRST-CLASS MAIL"
+    },
+    "imb": {
+      "barcode_identifier": "00",
+      "stid": "",
+      "serial_start": 1
+    }
+  },
+  "docusign": {
+    "account_type": "DocuSign for Government (FedRAMP)",
+    "routing_order": [
+      {
+        "role": "Election Official",
+        "type": "sign"
+      },
+      {
+        "role": "Finance",
+        "type": "sign"
+      },
+      {
+        "role": "Records",
+        "type": "sign"
+      }
+    ]
+  }
+	}
+
+
