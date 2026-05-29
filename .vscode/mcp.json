@@ -1,0 +1,46 @@
+{
+	"servers": {
+		"io.github.netdata/mcp-server": {
+			"type": "http",
+			"url": "https://app.netdata.cloud/api/v1/mcp",
+			"headers": {
+				"Authorization": "Bearer ${input:NETDATA_CLOUD_API_TOKEN}"
+			},
+			"gallery": "https://api.mcp.github.com",
+			"version": "2.10.3"
+		},
+		"microsoft/azure-devops-mcp": {
+			"type": "stdio",
+			"command": "npx",
+			"args": [
+				"-y",
+				"@azure-devops/mcp@latest",
+				"${input:ado_org}",
+				"-d",
+				"${input:ado_domain}"
+			],
+			"gallery": "https://api.mcp.github.com",
+			"version": "1.0.0"
+		}
+	},
+	"inputs": [
+		{
+			"id": "NETDATA_CLOUD_API_TOKEN",
+			"type": "promptString",
+			"description": "Netdata Cloud API token (create at app.netdata.cloud > User Settings > API Tokens with scope:mcp)",
+			"password": true
+		},
+		{
+			"id": "ado_org",
+			"type": "promptString",
+			"description": "Azure DevOps organization name (e.g., contoso).",
+			"password": false
+		},
+		{
+			"id": "ado_domain",
+			"type": "promptString",
+			"description": "Repeat to enable specific domains: core, work, work-items, search, test-plans, repositories, wiki, pipelines, advanced-security.",
+			"password": false
+		}
+	]
+}
