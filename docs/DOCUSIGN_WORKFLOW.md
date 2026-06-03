@@ -242,3 +242,33 @@ For documents requiring signature from external agencies, government entities, o
 
 *Document Authority: Alaina Padgett — alaina@verdigrisbotanicanation.org*  
 *Verdigris Botanica Tribal Nation Trust*
+<serviceInformation xmlns="http://www.docusign.com/restapi" xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+<buildVersion>26.1.203.2351 (26.1.02.03.66226+30ffdaf6155e)</buildVersion>
+<linkedSites>
+<string>https://www.docusign.net</string>
+<string>https://na2.docusign.net</string>
+<string>https://na3.docusign.net</string>
+<string>https://eu.docusign.net</string>
+<string>https://au.docusign.net</string>
+<string>https://ca.docusign.net</string>
+<string>https://na4.docusign.net</string>
+<string>https://jp1.docusign.net</string>
+</linkedSites>
+<serviceVersions>
+<serviceVersion>
+<version>v1</version>
+<versionUrl>https://na4.docusign.net/restapi/v1</versionUrl>
+</serviceVersion>
+<serviceVersion>
+<version>v2</version>
+<versionUrl>https://na4.docusign.net/restapi/v2</versionUrl>
+</serviceVersion>
+<serviceVersion>
+<version>v2.1</version>
+<versionUrl>https://na4.docusign.net/restapi/v2.1</versionUrl>
+</serviceVersion>
+</serviceVersions>
+</serviceInformation>
+
+https://account.docusign.com/oauth/token
+

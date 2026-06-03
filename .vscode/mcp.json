@@ -20,7 +20,7 @@
 				"${input:ado_domain}"
 			],
 			"gallery": "https://api.mcp.github.com",
-			"version": "1.0.0"
+			"version": "1.0.0" 
 		},
 		"com.stripe/mcp": {
 			"type": "http",
@@ -49,4 +49,53 @@
 			"password": false
 		}
 	]
+}{
+  "status": "ok",
+  "github_client_id": "",
+  "database": {
+    "status": "connected",
+    "type": "mysql"
+  },
+  "uptime": "44h23m4.121348542s",
+  "sha": "90cc0fdb99bc9690e0ada24e4847e6b6bb31e3cc",
+  "memory": {
+    "alloc": "64.43MB",
+    "sys": "121.48MB"
+  },
+  "sync": {
+    "enabled": true,
+    "strategy": "v2",
+    "pipeline_status": "complete",
+    "sync_sha": "90cc0fdb99bc9690e0ada24e4847e6b6bb31e3cc"
+  },
+  "data": {
+    "status": "ready_for_testing",
+    "updated_at": "2026-06-03T14:16:21Z",
+    "last_oss_snapshot_at": "2026-06-03T14:00:50Z"
+  }
+}
+{
+  "status": "ok",
+  "github_client_id": "",
+  "database": {
+    "status": "connected",
+    "type": "mysql"
+  },
+  "uptime": "41h54m53.222919733s",
+  "sha": "90cc0fdb99bc9690e0ada24e4847e6b6bb31e3cc",
+  "memory": {
+    "alloc": "50.28MB",
+    "sys": "125.48MB"
+  },
+  "sync": {
+    "enabled": true,
+    "strategy": "v2",
+    "pipeline_status": "complete",
+    "sync_sha": "90cc0fdb99bc9690e0ada24e4847e6b6bb31e3cc"
+  },
+  "data": {
+    "status": "ready_for_testing",
+    "updated_at": "2026-06-03T14:16:21Z",
+    "last_oss_snapshot_at": "2026-06-03T14:00:50Z"
+  }
 }
