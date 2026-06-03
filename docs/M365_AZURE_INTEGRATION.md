@@ -235,7 +235,7 @@ Install-Module -Name ScubaGear -Force
 Invoke-SCuBA -ProductNames * -OutPath ./scuba-reports/
 ```
 
-Schedule monthly assessments and store reports in SharePoint `VBTN Compliance Portal/Security Assessments`.
+Schedule monthly assessments and store reports in SharePoint `VBTN Compliance Portal/Security Assessments`.       
 
 ---
 
