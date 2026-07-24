@@ -8,7 +8,8 @@ All credentials are read exclusively from environment variables:
     DOCUSIGN_ACCOUNT_ID      — DocuSign account UUID
     DOCUSIGN_BASE_URL        — DocuSign REST API base URL
                                e.g. https://na4.docusign.net/restapi
-    DOCUSIGN_ACCESS_TOKEN    — ****** (injected by your OAuth flow or secret)
+    DOCUSIGN_ACCESS_TOKEN    — DocuSign OAuth access token for API authentication
+                               (injected by your OAuth flow or GitHub Environment Secret)
 
 Obligation-type → DocuSign template mapping is configured via
 DOCUSIGN_TEMPLATE_<RATE_TYPE>_<REMIC_CLASS> environment variables.
@@ -177,8 +178,7 @@ def send_docusign_envelope(
     Build and send a DocuSign envelope via the REST API.
     Returns the envelope_id.
     """
-    import json
-    import urllib.request
+    import requests as _requests
 
     account_id = _ds_env("DOCUSIGN_ACCOUNT_ID")
     base_url = _ds_env("DOCUSIGN_BASE_URL")
@@ -218,24 +218,22 @@ def send_docusign_envelope(
     }
 
     url = f"{base_url}/v2.1/accounts/{account_id}/envelopes"
-    payload = json.dumps(envelope_def).encode("utf-8")
-    req = urllib.request.Request(
+    resp = _requests.post(
         url,
-        data=payload,
-        method="POST",
+        json=envelope_def,
         headers={
             "Authorization": f"******",
-            "Content-Type": "application/json",
             "Accept": "application/json",
         },
+        timeout=15,
     )
-    with urllib.request.urlopen(req, timeout=15) as resp:  # nosec B310
-        result = json.loads(resp.read().decode("utf-8"))
+    resp.raise_for_status()
+    result = resp.json()
 
     envelope_id = result.get("envelopeId")
     if not envelope_id:
         raise RuntimeError(
-            f"DocuSign did not return an envelopeId. Response: {result}"
+            "DocuSign did not return an envelopeId"
         )
     return {"envelope_id": envelope_id, "status": result.get("status")}
 

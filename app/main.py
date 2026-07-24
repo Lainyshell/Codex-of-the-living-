@@ -127,7 +127,7 @@ def scan_payment():
             royalty_rate=body.get("royalty_rate"),
         )
     except (ValueError, TypeError) as exc:
-        return jsonify({"error": f"REMIC calculation error: {exc}"}), 422
+        return jsonify({"error": "REMIC calculation error: invalid input values"}), 422
 
     principal_str = str(calc["total_amount"] - calc["interest_amount"])
     interest_str = str(calc["interest_amount"])
@@ -156,7 +156,7 @@ def scan_payment():
             royalty_amount=royalty_str,
         )
     except ValueError as exc:
-        return jsonify({"error": str(exc)}), 409
+        return jsonify({"error": "Transaction conflict: duplicate submission"}), 409
 
     txn_id = txn["id"]
     db.append_audit_event(txn_id, "scan_received", {
@@ -184,7 +184,7 @@ def scan_payment():
     except RuntimeError as exc:
         db.update_transaction_status(txn_id, "failed")
         db.append_audit_event(txn_id, "stripe_error", {"error": str(exc)})
-        return jsonify({"error": f"Payment creation failed: {exc}"}), 502
+        return jsonify({"error": "Payment creation failed. Check server logs."}), 502
 
     db.update_transaction_status(
         txn_id, "stripe_created",
@@ -213,7 +213,7 @@ def scan_payment():
     except RuntimeError as exc:
         db.update_transaction_status(txn_id, "failed")
         db.append_audit_event(txn_id, "docusign_error", {"error": str(exc)})
-        return jsonify({"error": f"DocuSign routing failed: {exc}"}), 502
+        return jsonify({"error": "DocuSign routing failed. Check server logs."}), 502
 
     db.update_transaction_status(
         txn_id, "docusign_sent",

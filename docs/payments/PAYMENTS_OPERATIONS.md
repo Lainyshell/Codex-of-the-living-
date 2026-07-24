@@ -37,7 +37,7 @@ All credentials are read exclusively from environment variables. **Never commit 
 | `STRIPE_API_KEY` | ✅ | Stripe secret key (`sk_live_...` or `sk_test_...`) |
 | `DOCUSIGN_ACCOUNT_ID` | ✅ | DocuSign account UUID |
 | `DOCUSIGN_BASE_URL` | ✅ | DocuSign REST API base URL, e.g. `https://na4.docusign.net/restapi` |
-| `DOCUSIGN_ACCESS_TOKEN` | ✅ | DocuSign OAuth ****** |
+| `DOCUSIGN_ACCESS_TOKEN` | ✅ | DocuSign OAuth access token for API authentication |
 | `DOCUSIGN_HMAC_KEY` | ✅ | DocuSign Connect shared HMAC secret for webhook verification |
 | `DOCUSIGN_TEMPLATE_DEFAULT` | ✅ | Fallback DocuSign template UUID |
 | `DOCUSIGN_TEMPLATE_GOV_OBLIGATION_A` | ⚠️ | Template UUID for government obligation, class A |
@@ -219,7 +219,7 @@ The system uses SQLite (`PAYMENTS_DB_PATH`, default `/tmp/payments.db`) with WAL
 | `pending` | Record created; REMIC calculated |
 | `stripe_created` | Stripe PaymentIntent created |
 | `docusign_sent` | DocuSign envelope routed |
-| `completed` | Envelope signed; payment finalised |
+| `completed` | Envelope signed; payment finalized |
 | `failed` | Stripe or DocuSign error |
 
 Every status transition appends an immutable row to `audit_events`.
