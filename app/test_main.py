@@ -1,6 +1,8 @@
+import tempfile
 import unittest
+from pathlib import Path
 
-from main import app
+from main import app, load_source_rows, parse_decimal
 
 
 class ShippingReportEndpointTests(unittest.TestCase):
@@ -45,6 +47,24 @@ class ShippingReportEndpointTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.get_json()["status"], "error")
+
+
+class ShippingReportHelperTests(unittest.TestCase):
+    def test_parse_decimal_handles_supported_and_invalid_values(self):
+        self.assertEqual(str(parse_decimal("1,234.50")), "1234.50")
+        self.assertIsNone(parse_decimal("TBD"))
+        self.assertIsNone(parse_decimal(None))
+
+    def test_load_source_rows_rejects_unsupported_extensions(self):
+        with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as handle:
+            handle.write(b"unsupported")
+            temp_path = Path(handle.name)
+
+        try:
+            with self.assertRaises(ValueError):
+                load_source_rows(temp_path)
+        finally:
+            temp_path.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":

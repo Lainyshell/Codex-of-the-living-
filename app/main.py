@@ -159,7 +159,12 @@ def resolve_source_path(source_name):
     candidate = available_sources.get(source_name)
     if candidate is None:
         raise FileNotFoundError("Shipping source file was not found")
-    return candidate.resolve()
+
+    resolved_candidate = candidate.resolve()
+    if not resolved_candidate.is_relative_to(REPO_ROOT):
+        raise ValueError("Invalid source path")
+
+    return resolved_candidate
 
 
 def build_shipping_report(source_path):
@@ -258,11 +263,14 @@ def get_shipping_report():
     if output_format == "json":
         return jsonify(report)
     if output_format == "csv":
+        safe_filename = re.sub(r"[^A-Za-z0-9._-]+", "-", source_path.stem).strip("-")
         return Response(
             build_shipping_report_csv(report),
             mimetype="text/csv",
             headers={
-                "Content-Disposition": f"attachment; filename={source_path.stem}-shipping-report.csv"
+                "Content-Disposition": (
+                    f"attachment; filename={safe_filename or 'shipping-report'}-shipping-report.csv"
+                )
             },
         )
 
