@@ -185,19 +185,27 @@ jobs:
             operations-alert.json
 
       - name: Send Teams alert
-        if: steps.slo.outputs.should_alert == 'true' && secrets.TEAMS_WEBHOOK_URL != ''
+        if: steps.slo.outputs.should_alert == 'true'
         env:
           TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
         run: |
+          if [ -z "${TEAMS_WEBHOOK_URL:-}" ]; then
+            echo "TEAMS_WEBHOOK_URL is not configured; skipping Teams alert."
+            exit 0
+          fi
           curl -sS -X POST -H "Content-Type: application/json" \
             --data @operations-alert.json \
             "$TEAMS_WEBHOOK_URL"
 
       - name: Send email webhook alert
-        if: steps.slo.outputs.should_alert == 'true' && secrets.ALERT_EMAIL_WEBHOOK_URL != ''
+        if: steps.slo.outputs.should_alert == 'true'
         env:
           ALERT_EMAIL_WEBHOOK_URL: ${{ secrets.ALERT_EMAIL_WEBHOOK_URL }}
         run: |
+          if [ -z "${ALERT_EMAIL_WEBHOOK_URL:-}" ]; then
+            echo "ALERT_EMAIL_WEBHOOK_URL is not configured; skipping email webhook alert."
+            exit 0
+          fi
           curl -sS -X POST -H "Content-Type: application/json" \
             --data @operations-alert.json \
             "$ALERT_EMAIL_WEBHOOK_URL"
