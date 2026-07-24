@@ -4,11 +4,10 @@ Payments orchestration — Stripe PaymentIntent creation and DocuSign envelope r
 All credentials are read exclusively from environment variables:
 
     STRIPE_API_KEY          — Stripe secret key (sk_live_... / sk_test_...)
-    DOCUSIGN_INTEGRATION_KEY — DocuSign OAuth integration key (client ID)
-    DOCUSIGN_ACCOUNT_ID      — DocuSign account UUID
-    DOCUSIGN_BASE_URL        — DocuSign REST API base URL
+    DOCUSIGN_ACCOUNT_ID     — DocuSign account UUID
+    DOCUSIGN_BASE_URL       — DocuSign REST API base URL
                                e.g. https://na4.docusign.net/restapi
-    DOCUSIGN_ACCESS_TOKEN    — DocuSign OAuth access token for API authentication
+    DOCUSIGN_ACCESS_TOKEN   — DocuSign OAuth access token for API authentication
                                (injected by your OAuth flow or GitHub Environment Secret)
 
 Obligation-type → DocuSign template mapping is configured via
@@ -222,7 +221,7 @@ def send_docusign_envelope(
         url,
         json=envelope_def,
         headers={
-            "Authorization": f"******",
+            "Authorization": f"Bearer {access_token}",
             "Accept": "application/json",
         },
         timeout=15,
