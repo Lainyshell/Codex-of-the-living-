@@ -24,10 +24,12 @@ FIELD_ALIASES = {
     "address": ["Address"],
     "date_of_delivery": ["Date of Delivery", "Payment Date", "timestamp"],
     "form_3811_number": ["Form 3811 Number", "voucher_number", "AccountID"],
-    "certified_mail_number": ["Certified Mail Number", "routing_number"],
-    "registered_mail_number": ["Registered Mail Number", "po_number", "account_number"],
-    "transaction_type": ["Transaction Type", "Role", "Subject", "status"],
+    "certified_mail_number": ["Certified Mail Number"],
+    "registered_mail_number": ["Registered Mail Number"],
+    "transaction_type": ["Transaction Type", "Role", "Subject"],
     "amount": ["Amount", "amount"],
+    "source_reference": ["po_number", "account_number", "routing_number"],
+    "source_status": ["status"],
 }
 
 
@@ -139,6 +141,8 @@ def normalize_shipping_row(row, index):
         "amount": str(amount_value) if amount_value is not None else None,
         "raw_amount": raw_amount or None,
         "amount_valid": amount_value is not None,
+        "source_reference": get_row_value(row, "source_reference"),
+        "source_status": get_row_value(row, "source_status"),
     }
 
 
@@ -198,6 +202,8 @@ def build_shipping_report_csv(report):
         "amount",
         "raw_amount",
         "amount_valid",
+        "source_reference",
+        "source_status",
     ]
     writer = csv.DictWriter(output, fieldnames=fieldnames)
     writer.writeheader()

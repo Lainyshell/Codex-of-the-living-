@@ -133,7 +133,7 @@ Returns the JSON response from the Treasury API containing average interest rate
 Builds a USPS-style shipping report from repository transaction data.
 
 **Query parameters:**
-- `source` *(optional)*: Relative path to a supported `.xlsx`, `.csv`, or `.json` transaction file in the repository. Defaults to `Verified_Transactions_Template.xlsx`.
+- `source` *(optional)*: Filename of a supported `.xlsx`, `.csv`, or `.json` transaction file in the repository root. Defaults to `Verified_Transactions_Template.xlsx`.
 - `format` *(optional)*: `json` (default) or `csv`
 
 **Response:**
