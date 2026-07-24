@@ -1,0 +1,257 @@
+name: Operations Observability
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+env:
+  RATE_LATENCY_SLO_MS: "5000"
+  DEPLOYMENT_SUCCESS_SLO_PERCENT: "90"
+  FAILED_RUN_LIMIT: "2"
+
+jobs:
+  operations-dashboard:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Collect workflow metrics
+        id: metrics
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const { data } = await github.rest.actions.listWorkflowRunsForRepo({
+              owner,
+              repo,
+              per_page: 100
+            });
+            const runs = data.workflow_runs || [];
+
+            const releaseRuns = runs
+              .filter(r => r.name === 'Release Treasury API' && r.conclusion)
+              .slice(0, 10);
+            const releaseSuccess = releaseRuns.filter(r => r.conclusion === 'success').length;
+            const deploymentSuccessRate = releaseRuns.length > 0
+              ? Number(((releaseSuccess / releaseRuns.length) * 100).toFixed(2))
+              : 0;
+            const failedDeployments = releaseRuns.filter(r => r.conclusion === 'failure').length;
+            const latestRelease = releaseRuns[0] || null;
+
+            const complianceRuns = runs
+              .filter(r => r.name === 'VBTN Compliance Check' && r.conclusion)
+              .slice(0, 1);
+            const latestCompliance = complianceRuns[0] || null;
+
+            const payload = {
+              commit_sha: latestRelease?.head_sha || '',
+              deployment: {
+                latest_status: latestRelease?.status || 'unknown',
+                latest_conclusion: latestRelease?.conclusion || 'unknown',
+                latest_url: latestRelease?.html_url || '',
+                success_rate_10_runs: deploymentSuccessRate,
+                failed_runs_10: failedDeployments
+              },
+              compliance: {
+                latest_conclusion: latestCompliance?.conclusion || 'unknown',
+                latest_url: latestCompliance?.html_url || '',
+                release_gate_state: latestRelease?.status === 'in_progress'
+                  ? 'running-or-awaiting-environment-approval'
+                  : 'completed'
+              },
+              workflow_run_id: `${context.runId}`
+            };
+
+            core.setOutput('metrics_json', JSON.stringify(payload));
+            core.setOutput('deployment_success_rate', String(payload.deployment.success_rate_10_runs));
+            core.setOutput('failed_runs', String(payload.deployment.failed_runs_10));
+            core.setOutput('latest_release_conclusion', payload.deployment.latest_conclusion);
+            core.setOutput('latest_compliance_conclusion', payload.compliance.latest_conclusion);
+
+      - name: Probe production health
+        id: probe
+        env:
+          PROD_BASE_URL: ${{ vars.PRODUCTION_BASE_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "${PROD_BASE_URL:-}" ]; then
+            echo "uptime_ok=false" >> "$GITHUB_OUTPUT"
+            echo "rates_ok=false" >> "$GITHUB_OUTPUT"
+            echo "rates_latency_ms=0" >> "$GITHUB_OUTPUT"
+            echo "probe_note=PRODUCTION_BASE_URL is not configured" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          STATUS_BODY=$(curl -fsS "${PROD_BASE_URL}/")
+          python - <<'PY' "$STATUS_BODY"
+          import json, sys
+          payload = json.loads(sys.argv[1])
+          if payload.get("status") != "ok":
+              raise SystemExit("status endpoint response is not healthy")
+          PY
+
+          START_MS=$(date +%s%3N)
+          RATES_BODY=$(curl -fsS "${PROD_BASE_URL}/rates")
+          END_MS=$(date +%s%3N)
+          LATENCY_MS=$((END_MS - START_MS))
+          python - <<'PY' "$RATES_BODY"
+          import json, sys
+          payload = json.loads(sys.argv[1])
+          if "data" not in payload:
+              raise SystemExit("rates endpoint missing data field")
+          PY
+
+          echo "uptime_ok=true" >> "$GITHUB_OUTPUT"
+          echo "rates_ok=true" >> "$GITHUB_OUTPUT"
+          echo "rates_latency_ms=${LATENCY_MS}" >> "$GITHUB_OUTPUT"
+          echo "probe_note=ok" >> "$GITHUB_OUTPUT"
+
+      - name: Evaluate SLOs and prepare alerts
+        id: slo
+        env:
+          DEPLOYMENT_SUCCESS_RATE: ${{ steps.metrics.outputs.deployment_success_rate }}
+          FAILED_RUNS: ${{ steps.metrics.outputs.failed_runs }}
+          UPTIME_OK: ${{ steps.probe.outputs.uptime_ok }}
+          RATES_OK: ${{ steps.probe.outputs.rates_ok }}
+          RATES_LATENCY_MS: ${{ steps.probe.outputs.rates_latency_ms }}
+          PROBE_NOTE: ${{ steps.probe.outputs.probe_note }}
+          METRICS_JSON: ${{ steps.metrics.outputs.metrics_json }}
+        run: |
+          python - <<'PY'
+          import json, os
+
+          rate_latency_slo = int(os.environ["RATE_LATENCY_SLO_MS"])
+          deploy_success_slo = float(os.environ["DEPLOYMENT_SUCCESS_SLO_PERCENT"])
+          failed_run_limit = int(os.environ["FAILED_RUN_LIMIT"])
+
+          deployment_success_rate = float(os.environ.get("DEPLOYMENT_SUCCESS_RATE", "0") or "0")
+          failed_runs = int(os.environ.get("FAILED_RUNS", "0") or "0")
+          uptime_ok = os.environ.get("UPTIME_OK", "false") == "true"
+          rates_ok = os.environ.get("RATES_OK", "false") == "true"
+          rates_latency_ms = int(float(os.environ.get("RATES_LATENCY_MS", "0") or "0"))
+          probe_note = os.environ.get("PROBE_NOTE", "")
+
+          breaches = []
+          if not uptime_ok:
+            breaches.append("Production uptime check failed")
+          if not rates_ok:
+            breaches.append("/rates dependency check failed")
+          if rates_ok and rates_latency_ms > rate_latency_slo:
+            breaches.append(f"/rates latency breach: {rates_latency_ms}ms > {rate_latency_slo}ms")
+          if deployment_success_rate < deploy_success_slo:
+            breaches.append(f"Deployment success rate breach: {deployment_success_rate}% < {deploy_success_slo}%")
+          if failed_runs > failed_run_limit:
+            breaches.append(f"Failed deployment runs too high: {failed_runs} > {failed_run_limit}")
+
+          metrics = json.loads(os.environ["METRICS_JSON"])
+          metrics["health"] = {
+            "uptime_ok": uptime_ok,
+            "rates_ok": rates_ok,
+            "rates_latency_ms": rates_latency_ms,
+            "probe_note": probe_note
+          }
+          metrics["slo"] = {
+            "breaches": breaches,
+            "rate_latency_slo_ms": rate_latency_slo,
+            "deployment_success_slo_percent": deploy_success_slo,
+            "failed_run_limit": failed_run_limit
+          }
+
+          with open("operations-metrics.json", "w", encoding="utf-8") as f:
+            json.dump(metrics, f, indent=2)
+
+          should_alert = "true" if breaches else "false"
+          alert_body = {
+            "text": "VBTN operations alert",
+            "breaches": breaches,
+            "commit_sha": metrics.get("commit_sha", ""),
+            "workflow_run_id": metrics.get("workflow_run_id", "")
+          }
+          with open("operations-alert.json", "w", encoding="utf-8") as f:
+            json.dump(alert_body, f, indent=2)
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+            out.write(f"should_alert={should_alert}\n")
+          PY
+
+      - name: Upload operations metrics artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: operations-metrics
+          path: |
+            operations-metrics.json
+            operations-alert.json
+
+      - name: Send Teams alert
+        if: steps.slo.outputs.should_alert == 'true'
+        env:
+          TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
+        run: |
+          if [ -z "${TEAMS_WEBHOOK_URL:-}" ]; then
+            echo "TEAMS_WEBHOOK_URL is not configured; skipping Teams alert."
+            exit 0
+          fi
+          curl -sS -X POST -H "Content-Type: application/json" \
+            --data @operations-alert.json \
+            "$TEAMS_WEBHOOK_URL"
+
+      - name: Send email webhook alert
+        if: steps.slo.outputs.should_alert == 'true'
+        env:
+          ALERT_EMAIL_WEBHOOK_URL: ${{ secrets.ALERT_EMAIL_WEBHOOK_URL }}
+        run: |
+          if [ -z "${ALERT_EMAIL_WEBHOOK_URL:-}" ]; then
+            echo "ALERT_EMAIL_WEBHOOK_URL is not configured; skipping email webhook alert."
+            exit 0
+          fi
+          curl -sS -X POST -H "Content-Type: application/json" \
+            --data @operations-alert.json \
+            "$ALERT_EMAIL_WEBHOOK_URL"
+
+      - name: Publish operations dashboard summary
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          metrics = json.loads(Path("operations-metrics.json").read_text(encoding="utf-8"))
+          breaches = metrics["slo"]["breaches"]
+          overall = "✅ Healthy" if not breaches else "❌ Breach detected"
+
+          summary = f"""# VBTN Operations Dashboard
+
+          **Overall**: {overall}
+
+          ## App Delivery Lane
+          commit → build → deploy → health check → API success rate
+
+          | Signal | Value |
+          |---|---|
+          | Commit SHA | `{metrics.get('commit_sha', 'n/a')}` |
+          | Deployment status | {metrics['deployment']['latest_conclusion']} |
+          | Deployment success (last 10) | {metrics['deployment']['success_rate_10_runs']}% |
+          | Failed deployments (last 10) | {metrics['deployment']['failed_runs_10']} |
+          | Uptime check | {metrics['health']['uptime_ok']} |
+          | /rates check | {metrics['health']['rates_ok']} |
+          | /rates latency | {metrics['health']['rates_latency_ms']} ms |
+
+          ## Compliance Lane
+          compliance check pass/fail → release gate state
+
+          | Signal | Value |
+          |---|---|
+          | Latest compliance conclusion | {metrics['compliance']['latest_conclusion']} |
+          | Release gate state | {metrics['compliance']['release_gate_state']} |
+
+          ## Alert Breaches
+          {chr(10).join('- ' + b for b in breaches) if breaches else '- none'}
+          """
+
+          with open(Path.cwd() / Path(".github_step_summary_out.md"), "w", encoding="utf-8") as f:
+            f.write(summary)
+          PY
+          cat .github_step_summary_out.md >> "$GITHUB_STEP_SUMMARY"
