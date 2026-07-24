@@ -59,7 +59,9 @@ jobs:
               compliance: {
                 latest_conclusion: latestCompliance?.conclusion || 'unknown',
                 latest_url: latestCompliance?.html_url || '',
-                approval_state: latestRelease?.status === 'in_progress' ? 'pending-or-running' : 'completed'
+                release_gate_state: latestRelease?.status === 'in_progress'
+                  ? 'running-or-awaiting-environment-approval'
+                  : 'completed'
               },
               workflow_run_id: `${context.runId}`
             };
@@ -127,7 +129,7 @@ jobs:
           failed_run_limit = int(os.environ["FAILED_RUN_LIMIT"])
 
           deployment_success_rate = float(os.environ.get("DEPLOYMENT_SUCCESS_RATE", "0") or "0")
-          failed_runs = int(float(os.environ.get("FAILED_RUNS", "0") or "0"))
+          failed_runs = int(os.environ.get("FAILED_RUNS", "0") or "0")
           uptime_ok = os.environ.get("UPTIME_OK", "false") == "true"
           rates_ok = os.environ.get("RATES_OK", "false") == "true"
           rates_latency_ms = int(float(os.environ.get("RATES_LATENCY_MS", "0") or "0"))
@@ -238,12 +240,12 @@ jobs:
           | /rates latency | {metrics['health']['rates_latency_ms']} ms |
 
           ## Compliance Lane
-          compliance check pass/fail → approval state
+          compliance check pass/fail → release gate state
 
           | Signal | Value |
           |---|---|
           | Latest compliance conclusion | {metrics['compliance']['latest_conclusion']} |
-          | Approval state | {metrics['compliance']['approval_state']} |
+          | Release gate state | {metrics['compliance']['release_gate_state']} |
 
           ## Alert Breaches
           {chr(10).join('- ' + b for b in breaches) if breaches else '- none'}

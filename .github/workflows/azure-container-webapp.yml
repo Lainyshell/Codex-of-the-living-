@@ -36,6 +36,8 @@ jobs:
           REPO_LC="${GITHUB_REPOSITORY,,}"
           IMAGE_TAG="${GITHUB_SHA}"
           IMAGE_REF="ghcr.io/${REPO_LC}/${{ env.IMAGE_NAME }}:${IMAGE_TAG}"
+          # github.event.before can be empty/zero for first commits, manual runs, or force-push edges.
+          # When invalid, rollback is intentionally skipped.
           PREVIOUS_TAG="${{ github.event.before }}"
           echo "repo_lc=${REPO_LC}" >> "$GITHUB_OUTPUT"
           echo "image_tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
@@ -189,8 +191,18 @@ jobs:
             "  \"rates_latency_ms\":${DURATION_MS}" \
             '}'
 
+      - name: Validate rollback tag
+        id: rollback_tag
+        run: |
+          TAG="${{ needs.build.outputs.previous_tag }}"
+          if echo "$TAG" | grep -Eq '^[0-9a-f]{40}$' && [ "$TAG" != "0000000000000000000000000000000000000000" ]; then
+            echo "is_valid=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_valid=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Roll back to previous image tag
-        if: steps.smoke.outcome == 'failure' && needs.build.outputs.previous_tag != '' && needs.build.outputs.previous_tag != '0000000000000000000000000000000000000000'
+        if: steps.smoke.outcome == 'failure' && steps.rollback_tag.outputs.is_valid == 'true'
         uses: azure/webapps-deploy@v2
         with:
           app-name: ${{ vars.AZURE_WEBAPP_NAME_PRODUCTION }}
