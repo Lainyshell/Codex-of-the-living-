@@ -90,7 +90,8 @@ The application connects to the official U.S. Treasury Fiscal Data API:
 ├── compose.yaml          # Docker Compose configuration
 └── .github/
     └── workflows/
-        └── deploy.yaml   # GitHub Actions deployment workflow
+        ├── azure-container-webapp.yml  # Build + staged Azure release workflow
+        └── operations-observability.yml # Operations dashboard and alerting workflow
 ```
 
 ## Running Locally
@@ -131,7 +132,13 @@ Returns the JSON response from the Treasury API containing average interest rate
 
 ## Deployment
 
-The repository includes a GitHub Actions workflow (`.github/workflows/deploy.yaml`) that automatically deploys the application when changes are pushed to the `main` branch. The workflow uses the Defang deployment platform.
+The repository uses a single production app deployment workflow:
+
+- **Release workflow**: `.github/workflows/azure-container-webapp.yml`
+- **Observability workflow**: `.github/workflows/operations-observability.yml`
+- **Deployment/operations standard**: [`docs/DEPLOYMENT_OPERATIONS_STANDARD.md`](docs/DEPLOYMENT_OPERATIONS_STANDARD.md)
+
+The release workflow builds from `app/Dockerfile`, deploys staging then production, runs post-deploy smoke checks on `/` and `/rates`, and attempts rollback to the previous image tag if production smoke checks fail.
 
 ## Technologies
 
