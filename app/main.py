@@ -27,7 +27,7 @@ FIELD_ALIASES = {
     "certified_mail_number": ["Certified Mail Number"],
     "registered_mail_number": ["Registered Mail Number"],
     "transaction_type": ["Transaction Type", "Role", "Subject"],
-    "amount": ["Amount", "amount"],
+    "amount": ["Amount"],
     "source_reference": ["po_number", "account_number", "routing_number"],
     "source_status": ["status"],
 }
@@ -46,6 +46,8 @@ def parse_decimal(value):
 def get_row_value(row, field_name):
     for alias in FIELD_ALIASES[field_name]:
         value = row.get(alias)
+        if value in (None, ""):
+            value = row.get(alias.lower())
         if value not in (None, ""):
             return value
     return ""
@@ -264,13 +266,16 @@ def get_shipping_report():
         return jsonify(report)
     if output_format == "csv":
         safe_filename = re.sub(r"[^A-Za-z0-9._-]+", "-", source_path.stem).strip("-")
+        filename = (
+            f"{safe_filename}.csv"
+            if safe_filename.endswith("shipping-report")
+            else f"{safe_filename or 'shipping-report'}-shipping-report.csv"
+        )
         return Response(
             build_shipping_report_csv(report),
             mimetype="text/csv",
             headers={
-                "Content-Disposition": (
-                    f"attachment; filename={safe_filename or 'shipping-report'}-shipping-report.csv"
-                )
+                "Content-Disposition": f"attachment; filename={filename}"
             },
         )
 
