@@ -1,6 +1,7 @@
 import csv
 import io
 import json
+import re
 import zipfile
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
@@ -66,15 +67,30 @@ def read_xlsx_rows(path):
         rows = []
 
         for row in sheet.findall(".//main:sheetData/main:row", XML_NAMESPACES):
-            values = []
+            values_by_index = {}
             for cell in row.findall("main:c", XML_NAMESPACES):
                 cell_value = cell.find("main:v", XML_NAMESPACES)
+                cell_reference = cell.attrib.get("r", "")
+                column_letters = re.match(r"([A-Z]+)", cell_reference)
+                column_index = 0
+
+                if column_letters:
+                    for letter in column_letters.group(1):
+                        column_index = (column_index * 26) + (ord(letter) - 64)
+                    column_index -= 1
+
                 if cell_value is None:
-                    values.append("")
+                    value = ""
                 elif cell.attrib.get("t") == "s":
-                    values.append(shared_strings[int(cell_value.text)])
+                    value = shared_strings[int(cell_value.text)]
                 else:
-                    values.append(cell_value.text)
+                    value = cell_value.text
+                values_by_index[column_index] = value
+
+            values = [
+                values_by_index.get(index, "")
+                for index in range(max(values_by_index, default=-1) + 1)
+            ]
             rows.append(values)
 
         if not rows:
