@@ -129,6 +129,17 @@ Fetches the latest average interest rates from the U.S. Treasury Fiscal Data API
 **Response:**
 Returns the JSON response from the Treasury API containing average interest rate data.
 
+### GET /shipping-report
+Builds a USPS-style shipping report from repository transaction data.
+
+**Query parameters:**
+- `source` *(optional)*: Relative path to a supported `.xlsx`, `.csv`, or `.json` transaction file in the repository. Defaults to `Verified_Transactions_Template.xlsx`.
+- `format` *(optional)*: `json` (default) or `csv`
+
+**Response:**
+- `json`: A normalized shipping report with USPS tracking-related fields, transaction count, and total amount
+- `csv`: A downloadable shipping report with one row per transaction
+
 ## Deployment
 
 The repository includes a GitHub Actions workflow (`.github/workflows/deploy.yaml`) that automatically deploys the application when changes are pushed to the `main` branch. The workflow uses the Defang deployment platform.
