@@ -9,7 +9,7 @@ class ShippingReportEndpointTests(unittest.TestCase):
     def setUp(self):
         self.client = app.test_client()
 
-    def test_default_shipping_report_uses_verified_transactions_template(self):
+    def test_default_source_is_verified_transactions(self):
         response = self.client.get("/shipping-report")
 
         self.assertEqual(response.status_code, 200)
