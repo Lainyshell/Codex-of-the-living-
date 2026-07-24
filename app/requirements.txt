@@ -1,5 +1,5 @@
 uwsgi==2.0.24
 flask==3.0.0
 requests==2.31.0
-
-
+stripe==12.1.0
+docusign-esign==3.25.0
