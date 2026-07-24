@@ -150,6 +150,7 @@ def connect_transactions_to_business_central_account():
             failed.append({
                 "index": index,
                 "reason": "Failed to submit transaction to Business Central",
+                "errorType": "RequestException",
             })
 
     status_code = 200 if not failed else 207
@@ -157,6 +158,8 @@ def connect_transactions_to_business_central_account():
         "status": "ok" if not failed else "partial",
         "connectedCount": len(connected),
         "failedCount": len(failed),
+        "connectedTransactionIndexes": [item["index"] for item in connected],
+        "failedTransactionIndexes": [item["index"] for item in failed],
     }, status_code
 
 if __name__ == '__main__':
