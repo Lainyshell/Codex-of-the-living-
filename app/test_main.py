@@ -43,7 +43,7 @@ class ShippingReportEndpointTests(unittest.TestCase):
     def test_shipping_report_rejects_out_of_repo_paths(self):
         response = self.client.get("/shipping-report?source=../README.md")
 
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, 404)
         self.assertEqual(response.get_json()["status"], "error")
 
 

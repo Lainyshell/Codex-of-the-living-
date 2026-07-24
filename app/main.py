@@ -9,7 +9,7 @@ from pathlib import Path
 import xml.etree.ElementTree as ET
 
 import requests
-from flask import Flask, Response, request
+from flask import Flask, Response, jsonify, request
 
 
 app = Flask(__name__)
@@ -22,11 +22,11 @@ XML_NAMESPACES = {
 FIELD_ALIASES = {
     "recipient": ["Recipient", "Name", "issued_by"],
     "address": ["Address"],
-    "date_of_delivery": ["Date of Delivery", "Payment Date", "Date", "timestamp"],
-    "form_3811_number": ["Form 3811 Number", "voucher_number", "Number", "AccountID"],
+    "date_of_delivery": ["Date of Delivery", "Payment Date", "timestamp"],
+    "form_3811_number": ["Form 3811 Number", "voucher_number", "AccountID"],
     "certified_mail_number": ["Certified Mail Number", "routing_number"],
     "registered_mail_number": ["Registered Mail Number", "po_number", "account_number"],
-    "transaction_type": ["Transaction Type", "Role", "Subject", "status", "Description"],
+    "transaction_type": ["Transaction Type", "Role", "Subject", "status"],
     "amount": ["Amount", "amount"],
 }
 
@@ -125,7 +125,8 @@ def load_source_rows(path):
 
 
 def normalize_shipping_row(row, index):
-    amount_value = parse_decimal(get_row_value(row, "amount"))
+    raw_amount = get_row_value(row, "amount")
+    amount_value = parse_decimal(raw_amount)
     return {
         "line_number": index,
         "recipient": get_row_value(row, "recipient"),
@@ -135,17 +136,23 @@ def normalize_shipping_row(row, index):
         "certified_mail_number": get_row_value(row, "certified_mail_number"),
         "registered_mail_number": get_row_value(row, "registered_mail_number"),
         "transaction_type": get_row_value(row, "transaction_type"),
-        "amount": str(amount_value) if amount_value is not None else get_row_value(row, "amount"),
+        "amount": str(amount_value) if amount_value is not None else None,
+        "raw_amount": raw_amount or None,
+        "amount_valid": amount_value is not None,
     }
 
 
 def resolve_source_path(source_name):
-    candidate = (REPO_ROOT / source_name).resolve()
-    if REPO_ROOT not in candidate.parents and candidate != REPO_ROOT:
-        raise ValueError("Invalid source path")
-    if not candidate.is_file():
+    available_sources = {
+        path.name: path
+        for suffix in ("*.xlsx", "*.csv", "*.json")
+        for path in REPO_ROOT.glob(suffix)
+        if path.is_file()
+    }
+    candidate = available_sources.get(source_name)
+    if candidate is None:
         raise FileNotFoundError("Shipping source file was not found")
-    return candidate
+    return candidate.resolve()
 
 
 def build_shipping_report(source_path):
@@ -155,18 +162,14 @@ def build_shipping_report(source_path):
         for index, row in enumerate(rows, start=1)
     ]
     total_amount = sum(
-        (
-            parse_decimal(transaction["amount"])
-            for transaction in transactions
-            if parse_decimal(transaction["amount"]) is not None
-        ),
+        (Decimal(transaction["amount"]) for transaction in transactions if transaction["amount"] is not None),
         Decimal("0"),
     )
     return {
         "status": "ok",
         "report_type": "usps_shipping",
         "source_file": source_path.name,
-        "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
         "transaction_count": len(transactions),
         "total_amount": float(total_amount),
         "transactions": transactions,
@@ -185,6 +188,8 @@ def build_shipping_report_csv(report):
         "registered_mail_number",
         "transaction_type",
         "amount",
+        "raw_amount",
+        "amount_valid",
     ]
     writer = csv.DictWriter(output, fieldnames=fieldnames)
     writer.writeheader()
@@ -231,13 +236,13 @@ def get_shipping_report():
     try:
         source_path = resolve_source_path(source_name)
         report = build_shipping_report(source_path)
-    except ValueError as exc:
-        return {"status": "error", "message": str(exc)}, 400
-    except FileNotFoundError as exc:
-        return {"status": "error", "message": str(exc)}, 404
+    except ValueError:
+        return jsonify({"status": "error", "message": "Invalid shipping source request."}), 400
+    except FileNotFoundError:
+        return jsonify({"status": "error", "message": "Shipping source file was not found."}), 404
 
     if output_format == "json":
-        return report
+        return jsonify(report)
     if output_format == "csv":
         return Response(
             build_shipping_report_csv(report),
@@ -247,10 +252,10 @@ def get_shipping_report():
             },
         )
 
-    return {
+    return jsonify({
         "status": "error",
         "message": "Unsupported format. Use json or csv.",
-    }, 400
+    }), 400
 
 
 if __name__ == '__main__':
