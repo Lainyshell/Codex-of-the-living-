@@ -1,15 +1,227 @@
+import csv
+import io
+import json
+import re
+import zipfile
+from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
+from pathlib import Path
+import xml.etree.ElementTree as ET
 
 import os
 import uuid
 
 import requests
-from flask import Flask, jsonify, request
+from flask import Flask, Response, jsonify, request
 
 import db
 import payments
 import remic
 
 app = Flask(__name__)
+REPO_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_SHIPPING_SOURCE = REPO_ROOT / "Verified_Transactions_Template.xlsx"
+XML_NAMESPACES = {
+    "main": "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
+    "rel": "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+}
+FIELD_ALIASES = {
+    "recipient": ["Recipient", "Name"],
+    "address": ["Address"],
+    "date_of_delivery": ["Date of Delivery", "Payment Date", "timestamp"],
+    "form_3811_number": ["Form 3811 Number", "voucher_number", "AccountID"],
+    "certified_mail_number": ["Certified Mail Number"],
+    "registered_mail_number": ["Registered Mail Number"],
+    "transaction_type": ["Transaction Type", "Role", "Subject"],
+    "amount": ["Amount"],
+    "source_reference": ["po_number", "account_number", "routing_number"],
+    "source_status": ["status"],
+}
+
+
+def parse_decimal(value):
+    if value in (None, ""):
+        return None
+
+    try:
+        return Decimal(str(value).replace(",", "").strip())
+    except (InvalidOperation, AttributeError):
+        return None
+
+
+def get_row_value(row, field_name):
+    for alias in FIELD_ALIASES[field_name]:
+        value = row.get(alias)
+        if value in (None, ""):
+            value = row.get(alias.lower())
+        if value not in (None, ""):
+            return value
+    return ""
+
+
+def read_xlsx_rows(path):
+    with zipfile.ZipFile(path) as workbook:
+        shared_strings = []
+
+        if "xl/sharedStrings.xml" in workbook.namelist():
+            root = ET.fromstring(workbook.read("xl/sharedStrings.xml"))
+            for item in root.findall("main:si", XML_NAMESPACES):
+                shared_strings.append(
+                    "".join(
+                        text.text or ""
+                        for text in item.iterfind(".//main:t", XML_NAMESPACES)
+                    )
+                )
+
+        sheet = ET.fromstring(workbook.read("xl/worksheets/sheet1.xml"))
+        rows = []
+
+        for row in sheet.findall(".//main:sheetData/main:row", XML_NAMESPACES):
+            values_by_index = {}
+            for cell in row.findall("main:c", XML_NAMESPACES):
+                cell_value = cell.find("main:v", XML_NAMESPACES)
+                cell_reference = cell.attrib.get("r", "")
+                column_letters = re.match(r"([A-Z]+)", cell_reference)
+                column_index = 0
+
+                if column_letters:
+                    for letter in column_letters.group(1):
+                        column_index = (column_index * 26) + (ord(letter) - 64)
+                    column_index -= 1
+
+                if cell_value is None:
+                    value = ""
+                elif cell.attrib.get("t") == "s":
+                    value = shared_strings[int(cell_value.text)]
+                else:
+                    value = cell_value.text
+                values_by_index[column_index] = value
+
+            values = [
+                values_by_index.get(index, "")
+                for index in range(max(values_by_index, default=-1) + 1)
+            ]
+            rows.append(values)
+
+        if not rows:
+            return []
+
+        headers = rows[0]
+        return [dict(zip(headers, row)) for row in rows[1:] if any(row)]
+
+
+def read_csv_rows(path):
+    with path.open(newline="", encoding="utf-8-sig") as handle:
+        return list(csv.DictReader(handle))
+
+
+def read_json_rows(path):
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if isinstance(payload, list):
+        return [row for row in payload if isinstance(row, dict)]
+    if isinstance(payload, dict):
+        return [payload]
+    return []
+
+
+def load_source_rows(path):
+    if path.suffix.lower() == ".xlsx":
+        return read_xlsx_rows(path)
+    if path.suffix.lower() == ".csv":
+        return read_csv_rows(path)
+    if path.suffix.lower() == ".json":
+        return read_json_rows(path)
+    raise ValueError("Unsupported data source format")
+
+
+def normalize_shipping_row(row, index):
+    raw_amount = get_row_value(row, "amount")
+    amount_value = parse_decimal(raw_amount)
+    return {
+        "line_number": index,
+        "recipient": get_row_value(row, "recipient"),
+        "address": get_row_value(row, "address"),
+        "date_of_delivery": get_row_value(row, "date_of_delivery"),
+        "form_3811_number": get_row_value(row, "form_3811_number"),
+        "certified_mail_number": get_row_value(row, "certified_mail_number"),
+        "registered_mail_number": get_row_value(row, "registered_mail_number"),
+        "transaction_type": get_row_value(row, "transaction_type"),
+        "amount": str(amount_value) if amount_value is not None else None,
+        "raw_amount": raw_amount or None,
+        "amount_valid": amount_value is not None,
+        "source_reference": get_row_value(row, "source_reference"),
+        "source_status": get_row_value(row, "source_status"),
+    }
+
+
+def resolve_source_path(source_name):
+    if ".." in source_name or "/" in source_name or "\\" in source_name:
+        raise ValueError("Invalid source path")
+
+    available_sources = {
+        path.name: path
+        for suffix in ("*.xlsx", "*.csv", "*.json")
+        for path in REPO_ROOT.glob(suffix)
+        if path.is_file()
+    }
+    candidate = available_sources.get(source_name)
+    if candidate is None:
+        raise FileNotFoundError("Shipping source file was not found")
+
+    resolved_candidate = candidate.resolve()
+    if not resolved_candidate.is_relative_to(REPO_ROOT):
+        raise ValueError("Invalid source path")
+
+    return resolved_candidate
+
+
+def build_shipping_report(source_path):
+    rows = load_source_rows(source_path)
+    transactions = [
+        normalize_shipping_row(row, index)
+        for index, row in enumerate(rows, start=1)
+    ]
+    valid_amounts = [
+        Decimal(transaction["amount"])
+        for transaction in transactions
+        if transaction["amount"] is not None
+    ]
+    total_amount = sum(
+        valid_amounts,
+        Decimal("0"),
+    )
+    return {
+        "status": "ok",
+        "report_type": "usps_shipping",
+        "source_file": source_path.name,
+        "generated_at": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
+        "transaction_count": len(transactions),
+        "total_amount": float(total_amount),
+        "transactions": transactions,
+    }
+
+
+def build_shipping_report_csv(report):
+    output = io.StringIO()
+    fieldnames = [
+        "line_number",
+        "recipient",
+        "address",
+        "date_of_delivery",
+        "form_3811_number",
+        "certified_mail_number",
+        "registered_mail_number",
+        "transaction_type",
+        "amount",
+        "raw_amount",
+        "amount_valid",
+        "source_reference",
+        "source_status",
+    ]
+    writer = csv.DictWriter(output, fieldnames=fieldnames)
+    writer.writeheader()
+    writer.writerows(report["transactions"])
+    return output.getvalue()
 
 # Initialise the database on startup
 db.init_db()
@@ -48,6 +260,37 @@ def get_rates():
 
     # Return the data
     return data
+@app.route("/shipping-report")
+def get_shipping_report():
+    source_name = request.args.get("source", DEFAULT_SHIPPING_SOURCE.name)
+    output_format = request.args.get("format", "json").lower()
+
+    try:
+        source_path = resolve_source_path(source_name)
+        report = build_shipping_report(source_path)
+    except ValueError:
+        return jsonify({"status": "error", "message": "Invalid shipping source request."}), 400
+    except FileNotFoundError:
+        return jsonify({"status": "error", "message": "Shipping source file was not found."}), 404
+
+    if output_format == "json":
+        return jsonify(report)
+    if output_format == "csv":
+        safe_filename = re.sub(r"[^A-Za-z0-9._-]+", "-", source_path.stem).strip("-")
+        filename_prefix = safe_filename or "shipping-report"
+        filename = f"{filename_prefix}.csv"
+        return Response(
+            build_shipping_report_csv(report),
+            mimetype="text/csv",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"'
+            },
+        )
+
+    return jsonify({
+        "status": "error",
+        "message": "Unsupported format. Use json or csv.",
+    }), 400
 
 
 # ---------------------------------------------------------------------------
