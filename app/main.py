@@ -152,9 +152,9 @@ def connect_transactions_to_business_central_account():
                 "reason": "Failed to submit transaction to Business Central",
             })
 
-    status_code = 200 if len(failed) == 0 else 207
+    status_code = 200 if not failed else 207
     return {
-        "status": "ok" if len(failed) == 0 else "partial",
+        "status": "ok" if not failed else "partial",
         "connectedCount": len(connected),
         "failedCount": len(failed),
     }, status_code
