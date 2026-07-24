@@ -266,16 +266,17 @@ def get_shipping_report():
         return jsonify(report)
     if output_format == "csv":
         safe_filename = re.sub(r"[^A-Za-z0-9._-]+", "-", source_path.stem).strip("-")
+        base_filename = safe_filename or "shipping-report"
         filename = (
-            f"{safe_filename}.csv"
-            if safe_filename.endswith("shipping-report")
-            else f"{safe_filename or 'shipping-report'}-shipping-report.csv"
+            f"{base_filename}.csv"
+            if base_filename.endswith("shipping-report")
+            else f"{base_filename}-shipping-report.csv"
         )
         return Response(
             build_shipping_report_csv(report),
             mimetype="text/csv",
             headers={
-                "Content-Disposition": f"attachment; filename={filename}"
+                "Content-Disposition": f'attachment; filename="{filename}"'
             },
         )
 
