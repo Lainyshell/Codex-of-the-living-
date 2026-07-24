@@ -143,6 +143,9 @@ def normalize_shipping_row(row, index):
 
 
 def resolve_source_path(source_name):
+    if ".." in source_name or "/" in source_name or "\\" in source_name:
+        raise ValueError("Invalid source path")
+
     available_sources = {
         path.name: path
         for suffix in ("*.xlsx", "*.csv", "*.json")
@@ -161,8 +164,13 @@ def build_shipping_report(source_path):
         normalize_shipping_row(row, index)
         for index, row in enumerate(rows, start=1)
     ]
+    valid_amounts = [
+        Decimal(transaction["amount"])
+        for transaction in transactions
+        if transaction["amount"] is not None
+    ]
     total_amount = sum(
-        (Decimal(transaction["amount"]) for transaction in transactions if transaction["amount"] is not None),
+        valid_amounts,
         Decimal("0"),
     )
     return {
