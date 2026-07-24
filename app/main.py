@@ -20,7 +20,7 @@ XML_NAMESPACES = {
     "rel": "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
 }
 FIELD_ALIASES = {
-    "recipient": ["Recipient", "Name", "issued_by"],
+    "recipient": ["Recipient", "Name"],
     "address": ["Address"],
     "date_of_delivery": ["Date of Delivery", "Payment Date", "timestamp"],
     "form_3811_number": ["Form 3811 Number", "voucher_number", "AccountID"],
@@ -169,7 +169,7 @@ def build_shipping_report(source_path):
         "status": "ok",
         "report_type": "usps_shipping",
         "source_file": source_path.name,
-        "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
+        "generated_at": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
         "transaction_count": len(transactions),
         "total_amount": float(total_amount),
         "transactions": transactions,
