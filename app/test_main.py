@@ -5,7 +5,7 @@ from pathlib import Path
 from main import app, load_source_rows, parse_decimal
 
 
-class ShippingReportEndpointTests(unittest.TestCase):
+class TestShippingReportEndpoint(unittest.TestCase):
     def setUp(self):
         self.client = app.test_client()
 
@@ -49,7 +49,7 @@ class ShippingReportEndpointTests(unittest.TestCase):
         self.assertEqual(response.get_json()["status"], "error")
 
 
-class ShippingReportHelperTests(unittest.TestCase):
+class TestShippingReportHelper(unittest.TestCase):
     def test_parse_decimal_handles_supported_and_invalid_values(self):
         self.assertEqual(str(parse_decimal("1,234.50")), "1234.50")
         self.assertIsNone(parse_decimal("TBD"))
