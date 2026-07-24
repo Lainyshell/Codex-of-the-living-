@@ -15,6 +15,7 @@ concurrency:
 
 env:
   IMAGE_NAME: vbtn-treasury-api
+  NULL_SHA: "0000000000000000000000000000000000000000"
   RATE_LATENCY_THRESHOLD_MS: "5000"
 
 jobs:
@@ -195,7 +196,7 @@ jobs:
         id: rollback_tag
         run: |
           TAG="${{ needs.build.outputs.previous_tag }}"
-          if echo "$TAG" | grep -Eq '^[0-9a-f]{40}$' && [ "$TAG" != "0000000000000000000000000000000000000000" ]; then
+          if echo "$TAG" | grep -Eq '^[0-9a-f]{40}$' && [ "$TAG" != "${{ env.NULL_SHA }}" ]; then
             echo "is_valid=true" >> "$GITHUB_OUTPUT"
           else
             echo "is_valid=false" >> "$GITHUB_OUTPUT"
