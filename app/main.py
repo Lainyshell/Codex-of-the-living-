@@ -135,23 +135,21 @@ def connect_transactions_to_business_central_account():
         try:
             bc_response = requests.post(endpoint_url, headers=headers, json=journal_line, timeout=20)
             if bc_response.status_code in (200, 201):
+                created_line = bc_response.json()
                 connected.append({
                     "index": index,
-                    "transaction": transaction,
-                    "businessCentralJournalLine": bc_response.json(),
+                    "journalLineId": created_line.get("id"),
                 })
             else:
                 failed.append({
                     "index": index,
-                    "transaction": transaction,
                     "statusCode": bc_response.status_code,
-                    "response": bc_response.text,
+                    "reason": "Business Central rejected the transaction",
                 })
-        except requests.RequestException as error:
+        except requests.RequestException:
             failed.append({
                 "index": index,
-                "transaction": transaction,
-                "reason": str(error),
+                "reason": "Failed to submit transaction to Business Central",
             })
 
     status_code = 200 if len(failed) == 0 else 207
