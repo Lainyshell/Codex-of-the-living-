@@ -168,7 +168,7 @@ Connects one or more transactions to a Business Central account by creating jour
 }
 ```
 
-Each transaction must include `accountId` and `amount`. The endpoint returns counts and details for connected and failed transactions.
+Each transaction must include `accountId` and `amount`. The endpoint returns aggregate counts for connected and failed transactions.
 
 ## Deployment
 

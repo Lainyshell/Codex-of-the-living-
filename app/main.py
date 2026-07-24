@@ -157,8 +157,6 @@ def connect_transactions_to_business_central_account():
         "status": "ok" if len(failed) == 0 else "partial",
         "connectedCount": len(connected),
         "failedCount": len(failed),
-        "connected": connected,
-        "failed": failed,
     }, status_code
 
 if __name__ == '__main__':
