@@ -142,6 +142,34 @@ Fetches the latest average interest rates from the U.S. Treasury Fiscal Data API
 **Response:**
 Returns the JSON response from the Treasury API containing average interest rate data.
 
+### POST /business-central/transactions/connect
+Connects one or more transactions to a Business Central account by creating journal lines in a target journal batch.
+
+**Required environment variables:**
+- `BUSINESS_CENTRAL_TENANT_ID`
+- `BUSINESS_CENTRAL_ENVIRONMENT`
+- `BUSINESS_CENTRAL_COMPANY_ID`
+- `BUSINESS_CENTRAL_BASE_URL` *(optional, defaults to `https://api.businesscentral.dynamics.com/v2.0`)*
+
+**Request body:**
+```json
+{
+  "journalBatchId": "JOURNAL_BATCH_GUID",
+  "accessToken": "AZURE_AD_ACCESS_TOKEN",
+  "transactions": [
+    {
+      "accountId": "ACCOUNT_GUID",
+      "amount": 250.75,
+      "description": "Office supplies",
+      "documentNumber": "INV-204",
+      "postingDate": "2026-07-24"
+    }
+  ]
+}
+```
+
+Each transaction must include `accountId` and `amount`. The endpoint returns aggregate counts for connected and failed transactions.
+
 ## Deployment
 
 The repository includes a GitHub Actions workflow (`.github/workflows/deploy.yaml`) that automatically deploys the application when changes are pushed to the `main` branch. The workflow uses the Defang deployment platform.

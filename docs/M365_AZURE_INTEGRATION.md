@@ -15,6 +15,23 @@ This guide describes how the VBTN GitHub Compliance Door integrates with the Mic
 
 ## 1. Microsoft Entra ID (Azure AD) — Identity
 
+### GCC High / Azure Government Baseline
+
+For VBTN GCC High operation, configure all automation and cloud connectors against the Azure Government cloud profile:
+
+- Cloud profile: `AzureUSGovernment`
+- Portal: `https://portal.azure.us`
+- Login authority: `https://login.microsoftonline.us/`
+- ARM resource manager: `https://management.usgovcloudapi.net/`
+- Microsoft Graph (Gov): `https://graph.microsoft.us/`
+
+Store tenant/subscription metadata as secrets (not hardcoded in workflow files):
+
+- `AZURE_TENANT_ID`
+- `AZURE_SUBSCRIPTION_ID`
+- `AZURE_ENVIRONMENT` (set to `AzureUSGovernment`)
+- `AZURE_MANAGEMENT_GROUP_ID` (optional but recommended for policy scoping)
+
 ### SAML SSO Configuration for GitHub
 
 All GitHub organization members must authenticate using VBTN Entra ID credentials.
@@ -207,6 +224,9 @@ All credentials and secrets used by GitHub Actions and Power Automate are stored
 | `SHAREPOINT-CLIENT-ID` | Azure App Registration client ID |
 | `SHAREPOINT-CLIENT-SECRET` | Azure App Registration client secret |
 | `AZURE-TENANT-ID` | VBTN Azure tenant ID |
+| `AZURE-SUBSCRIPTION-ID` | Azure Government subscription ID used by automation |
+| `AZURE-ENVIRONMENT` | Azure cloud profile (`AzureUSGovernment`) |
+| `AZURE-MANAGEMENT-GROUP-ID` | Parent management group for policy and RBAC scope |
 
 **Access Policy**: Only `vbtn-github-actions` app registration and admin (`alaina@verdigrisbotanicanation.org`) may read secrets.
 
