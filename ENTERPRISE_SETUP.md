@@ -74,10 +74,26 @@ All repository secrets and API credentials must be stored in **Azure Key Vault**
   - `DOCUSIGN_ACCOUNT_ID`
   - `SHAREPOINT_CLIENT_ID`
   - `SHAREPOINT_CLIENT_SECRET`
+  - `AZURE_TENANT_ID`
+  - `AZURE_SUBSCRIPTION_ID`
+  - `AZURE_ENVIRONMENT` (`AzureUSGovernment`)
+  - `AZURE_MANAGEMENT_GROUP_ID`
 
 Reference these from GitHub Actions via GitHub **Environment Secrets** (see `AUTOMATION_GUIDE.md`).
 
-### 2.3 PowerApps & Power Automate Integration
+### 2.3 GCC High / Azure Government Configuration
+
+Configure all Azure-connected systems for GCC High using government cloud endpoints:
+
+- Azure cloud profile: `AzureUSGovernment`
+- Azure portal: `https://portal.azure.us`
+- Entra login authority: `https://login.microsoftonline.us/`
+- ARM endpoint: `https://management.usgovcloudapi.net/`
+- Microsoft Graph endpoint: `https://graph.microsoft.us/`
+
+Never hardcode tenant, subscription, or management group IDs in workflows; pull them from Key Vault or GitHub environment secrets.
+
+### 2.4 PowerApps & Power Automate Integration
 
 Power Automate flows connect this repository to VBTN operational workflows:
 
@@ -152,6 +168,7 @@ This GitHub repository acts as the **Compliance Door** — the authoritative, au
 - [ ] Configure Entra ID SAML app for GitHub SSO
 - [ ] Create `vbtn-github-secrets` Key Vault
 - [ ] Add GitHub Actions secrets to Key Vault and GitHub Environment
+- [ ] Set Azure cloud profile to `AzureUSGovernment` for all Azure-connected automation
 - [ ] Configure Power Automate flows (see `docs/AUTOMATION_GUIDE.md`)
 - [ ] Verify SharePoint document library integration
 
