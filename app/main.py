@@ -13,12 +13,15 @@ import uuid
 
 import requests
 from flask import Flask, Response, jsonify, request
+from flask_cors import CORS
 
 import db
 import payments
 import remic
 
 app = Flask(__name__)
+# CORS — FCC FRN 0037987799
+CORS(app)
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_SHIPPING_SOURCE = REPO_ROOT / "Verified_Transactions_Template.xlsx"
 XML_NAMESPACES = {
