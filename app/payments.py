@@ -3,12 +3,28 @@ Payments orchestration — Stripe PaymentIntent creation and DocuSign envelope r
 
 All credentials are read exclusively from environment variables:
 
-    STRIPE_API_KEY          — Stripe secret key (sk_live_... / sk_test_...)
-    DOCUSIGN_ACCOUNT_ID     — DocuSign account UUID
-    DOCUSIGN_BASE_URL       — DocuSign REST API base URL
-                               e.g. https://na4.docusign.net/restapi
-    DOCUSIGN_ACCESS_TOKEN   — DocuSign OAuth access token for API authentication
-                               (injected by your OAuth flow or GitHub Environment Secret)
+    STRIPE_API_KEY              — Stripe secret key (sk_live_... / sk_test_...)
+
+    -- DocuSign JWT (preferred) --
+    DOCUSIGN_INTEGRATION_KEY    — Remic Portal integration key (OAuth client ID)
+                                   Value: 54934ea2-813f-4288-8a8e-e09c293701ce
+                                   RSA Keypair ID in DocuSign dashboard:
+                                   428733c8-7467-4743-aede-3193af7620b0
+    DOCUSIGN_USER_ID            — DocuSign user GUID to impersonate (API Username)
+    DOCUSIGN_PRIVATE_KEY        — RSA private key PEM content (the private half of
+                                   keypair 428733c8-7467-4743-aede-3193af7620b0)
+    DOCUSIGN_OAUTH_HOST         — OAuth hostname (default: account.docusign.com)
+                                   FedRAMP / GovCloud: account.docusign.us
+
+    -- DocuSign common --
+    DOCUSIGN_ACCOUNT_ID         — DocuSign account UUID
+    DOCUSIGN_BASE_URL           — DocuSign REST API base URL
+                                   e.g. https://na4.docusign.net/restapi
+    DOCUSIGN_HMAC_KEY           — Shared HMAC secret for webhook signature verification
+
+    -- Backward-compat bypass (skips JWT when set) --
+    DOCUSIGN_ACCESS_TOKEN       — Pre-obtained ******; JWT auth is skipped
+                                   when this variable is present
 
 Obligation-type → DocuSign template mapping is configured via
 DOCUSIGN_TEMPLATE_<RATE_TYPE>_<REMIC_CLASS> environment variables.
@@ -93,6 +109,12 @@ def create_stripe_payment(
 # DocuSign
 # ---------------------------------------------------------------------------
 
+# Remic Portal — Integration Key (OAuth client ID).
+# Store this value in the DOCUSIGN_INTEGRATION_KEY environment variable.
+# RSA Keypair ID in the DocuSign dashboard (for reference):
+#   428733c8-7467-4743-aede-3193af7620b0
+_DOCUSIGN_INTEGRATION_KEY_DEFAULT = "54934ea2-813f-4288-8a8e-e09c293701ce"
+
 
 def _ds_env(var: str, required: bool = True) -> str:
     val = os.environ.get(var, "")
@@ -102,6 +124,57 @@ def _ds_env(var: str, required: bool = True) -> str:
             "Configure all DOCUSIGN_* variables before routing envelopes."
         )
     return val
+
+
+def _get_docusign_token() -> str:
+    """
+    Obtain a DocuSign access token via JWT Grant or bypass mode.
+
+    Priority:
+      1. If DOCUSIGN_ACCESS_TOKEN is set, return it directly (bypass JWT).
+      2. Otherwise perform JWT Grant using:
+           DOCUSIGN_INTEGRATION_KEY  (defaults to the Remic Portal key)
+           DOCUSIGN_USER_ID          (API Username / impersonated user GUID)
+           DOCUSIGN_PRIVATE_KEY      (PEM content of RSA keypair
+                                      428733c8-7467-4743-aede-3193af7620b0)
+           DOCUSIGN_OAUTH_HOST       (default: account.docusign.com)
+    """
+    bypass = os.environ.get("DOCUSIGN_ACCESS_TOKEN", "")
+    if bypass:
+        return bypass
+
+    # JWT Grant via the docusign-esign SDK
+    from docusign_esign import ApiClient  # type: ignore[import-untyped]
+
+    integration_key = os.environ.get(
+        "DOCUSIGN_INTEGRATION_KEY", _DOCUSIGN_INTEGRATION_KEY_DEFAULT
+    )
+    user_id = _ds_env("DOCUSIGN_USER_ID")
+    private_key_raw = _ds_env("DOCUSIGN_PRIVATE_KEY")
+    oauth_host = os.environ.get("DOCUSIGN_OAUTH_HOST", "account.docusign.com")
+
+    private_key_bytes = private_key_raw.encode("utf-8")
+
+    api_client = ApiClient()
+    api_client.host = _ds_env("DOCUSIGN_BASE_URL")
+
+    try:
+        token_response = api_client.request_jwt_user_token(
+            client_id=integration_key,
+            user_id=user_id,
+            oauth_host_name=oauth_host,
+            private_key_bytes=private_key_bytes,
+            expires_in=3600,
+            scopes=["signature", "impersonation"],
+        )
+    except Exception as exc:
+        raise RuntimeError(
+            f"DocuSign JWT token request failed: {exc}. "
+            "Verify DOCUSIGN_INTEGRATION_KEY, DOCUSIGN_USER_ID, "
+            "DOCUSIGN_PRIVATE_KEY, and DOCUSIGN_OAUTH_HOST."
+        ) from exc
+
+    return token_response.access_token
 
 
 def _resolve_template(rate_type: str, remic_class: str) -> str:
@@ -174,67 +247,73 @@ def send_docusign_envelope(
     transaction_id: str,
 ) -> dict:
     """
-    Build and send a DocuSign envelope via the REST API.
-    Returns the envelope_id.
+    Build and send a DocuSign envelope via the SDK (EnvelopesApi).
+    Returns a dict with envelope_id and status.
     """
-    import requests as _requests
+    from docusign_esign import ApiClient, EnvelopesApi  # type: ignore[import-untyped]
+    from docusign_esign.models import (  # type: ignore[import-untyped]
+        EnvelopeDefinition,
+        Tabs,
+        TemplateRole,
+        Text,
+    )
 
     account_id = _ds_env("DOCUSIGN_ACCOUNT_ID")
     base_url = _ds_env("DOCUSIGN_BASE_URL")
-    access_token = _ds_env("DOCUSIGN_ACCESS_TOKEN")
+    access_token = _get_docusign_token()
     template_id = _resolve_template(rate_type, remic_class)
 
     recipients = _build_recipients(vendor_name, vendor_email)
 
-    # Map recipients for template roles
-    template_roles = []
-    for r in recipients:
-        template_roles.append(
-            {
-                "email": r["email"],
-                "name": r["name"],
-                "roleName": r["roleName"],
-                "tabs": {
-                    "textTabs": [
-                        {"tabLabel": "principal", "value": principal},
-                        {"tabLabel": "interest", "value": interest},
-                        {"tabLabel": "total", "value": total},
-                        {"tabLabel": "remic_class", "value": remic_class},
-                        {"tabLabel": "payment_id", "value": stripe_payment_id},
-                        {"tabLabel": "vendor_id", "value": vendor_id},
-                        {"tabLabel": "obligation_id", "value": obligation_id},
-                        {"tabLabel": "transaction_id", "value": transaction_id},
-                    ]
-                },
-            }
+    tab_values = [
+        Text(tab_label="principal", value=principal),
+        Text(tab_label="interest", value=interest),
+        Text(tab_label="total", value=total),
+        Text(tab_label="remic_class", value=remic_class),
+        Text(tab_label="payment_id", value=stripe_payment_id),
+        Text(tab_label="vendor_id", value=vendor_id),
+        Text(tab_label="obligation_id", value=obligation_id),
+        Text(tab_label="transaction_id", value=transaction_id),
+    ]
+
+    template_roles = [
+        TemplateRole(
+            email=r["email"],
+            name=r["name"],
+            role_name=r["roleName"],
+            tabs=Tabs(text_tabs=tab_values),
         )
+        for r in recipients
+    ]
 
-    envelope_def = {
-        "templateId": template_id,
-        "templateRoles": template_roles,
-        "status": "sent",
-        "emailSubject": f"Payment Obligation {obligation_id} — Signature Required",
-    }
-
-    url = f"{base_url}/v2.1/accounts/{account_id}/envelopes"
-    resp = _requests.post(
-        url,
-        json=envelope_def,
-        headers={
-            "Authorization": f"Bearer {access_token}",
-            "Accept": "application/json",
-        },
-        timeout=15,
+    email_subject = f"Payment Obligation {obligation_id} — Signature Required"
+    envelope_def = EnvelopeDefinition(
+        template_id=template_id,
+        template_roles=template_roles,
+        status="sent",
+        email_subject=email_subject,
     )
-    resp.raise_for_status()
-    result = resp.json()
 
-    envelope_id = result.get("envelopeId")
-    if not envelope_id:
-        raise RuntimeError(
-            "DocuSign did not return an envelopeId"
+    api_client = ApiClient()
+    api_client.host = f"{base_url}/v2.1"
+
+    api_client.set_default_header("Authorization", f"******")
+
+    try:
+        result = EnvelopesApi(api_client).create_envelope(
+            account_id=account_id,
+            envelope_definition=envelope_def,
         )
-    return {"envelope_id": envelope_id, "status": result.get("status")}
+    except Exception as exc:
+        raise RuntimeError(
+            "DocuSign create_envelope failed: " + str(exc)
+        ) from exc
+
+    envelope_id = result.envelope_id
+    if not envelope_id:
+        raise RuntimeError("DocuSign did not return an envelopeId")
+
+    return {"envelope_id": envelope_id, "status": result.status}
 
 
 # ---------------------------------------------------------------------------

@@ -32,12 +32,30 @@ DocuSign Completion → POST /api/docusign-webhook
 
 All credentials are read exclusively from environment variables. **Never commit secrets to the repository.**
 
+### DocuSign JWT Authentication (Remic Portal)
+
+Authentication uses **JWT Grant** via the Remic Portal app registered in DocuSign:
+
+| App Setting | Value |
+|---|---|
+| App Name | Remic Portal |
+| Integration Key | `54934ea2-813f-4288-8a8e-e09c293701ce` |
+| Authentication | Authorization Code Grant / JWT |
+| RSA Keypair ID | `428733c8-7467-4743-aede-3193af7620b0` |
+| Redirect URI | `https://vbtn.org/oauth` |
+
+Set the following GitHub Environment Secrets before deploying. JWT auth is used when `DOCUSIGN_INTEGRATION_KEY` + `DOCUSIGN_USER_ID` + `DOCUSIGN_PRIVATE_KEY` are all present. If only `DOCUSIGN_ACCESS_TOKEN` is set, it is used directly (bypass mode).
+
 | Variable | Required | Description |
 |---|---|---|
 | `STRIPE_API_KEY` | ✅ | Stripe secret key (`sk_live_...` or `sk_test_...`) |
 | `DOCUSIGN_ACCOUNT_ID` | ✅ | DocuSign account UUID |
 | `DOCUSIGN_BASE_URL` | ✅ | DocuSign REST API base URL, e.g. `https://na4.docusign.net/restapi` |
-| `DOCUSIGN_ACCESS_TOKEN` | ✅ | DocuSign OAuth access token for API authentication |
+| `DOCUSIGN_INTEGRATION_KEY` | ✅ | Remic Portal integration key: `54934ea2-813f-4288-8a8e-e09c293701ce` |
+| `DOCUSIGN_USER_ID` | ✅ | DocuSign API Username (user GUID to impersonate) |
+| `DOCUSIGN_PRIVATE_KEY` | ✅ | RSA private key PEM content (keypair `428733c8-7467-4743-aede-3193af7620b0`) |
+| `DOCUSIGN_OAUTH_HOST` | ⚠️ | OAuth hostname (default: `account.docusign.com`; FedRAMP: `account.docusign.us`) |
+| `DOCUSIGN_ACCESS_TOKEN` | ⚠️ | Pre-obtained access token — bypasses JWT when set (legacy/testing only) |
 | `DOCUSIGN_HMAC_KEY` | ✅ | DocuSign Connect shared HMAC secret for webhook verification |
 | `DOCUSIGN_TEMPLATE_DEFAULT` | ✅ | Fallback DocuSign template UUID |
 | `DOCUSIGN_TEMPLATE_GOV_OBLIGATION_A` | ⚠️ | Template UUID for government obligation, class A |

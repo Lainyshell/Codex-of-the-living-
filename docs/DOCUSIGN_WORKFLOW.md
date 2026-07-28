@@ -32,25 +32,37 @@ All VBTN legal documents requiring formal signatures — including Declarations,
    - `DOCUSIGN-USER-ID`
    - `DOCUSIGN-INTEGRATION-KEY` (from API app registration below)
 
-### 1.2 DocuSign API App Registration
+### 1.2 DocuSign API App — Remic Portal
 
-1. In the DocuSign Admin console, go to **API and Keys**.
-2. Create a new app: `VBTN Compliance Door Integration`
-3. Note the **Integration Key** → store as `DOCUSIGN-INTEGRATION-KEY` in Azure Key Vault.
-4. Under **Authentication**, select **JWT Grant** (for server-to-server automation).
-5. Generate an RSA keypair:
-   - Store **private key** securely in Azure Key Vault.
-   - Upload **public key** to DocuSign.
-6. Add redirect URI: `https://github.com/Lainyshell/Codex-of-the-living-`
+The VBTN payments system uses the **Remic Portal** app registered in DocuSign:
+
+| Setting | Value |
+|---|---|
+| App Name | Remic Portal |
+| Integration Key | `54934ea2-813f-4288-8a8e-e09c293701ce` |
+| Authentication | Authorization Code Grant + JWT |
+| RSA Keypair ID | `428733c8-7467-4743-aede-3193af7620b0` |
+| Redirect URI | `https://vbtn.org/oauth` |
+
+To configure a new environment:
+
+1. In the DocuSign Admin console, go to **API and Keys** and locate the **Remic Portal** app.
+2. Confirm the Integration Key is `54934ea2-813f-4288-8a8e-e09c293701ce`.
+3. Under **RSA Keypairs**, locate keypair `428733c8-7467-4743-aede-3193af7620b0`.
+   - Download the **private key** and store it securely in Azure Key Vault as `DOCUSIGN-PRIVATE-KEY`.
+   - The public key is already uploaded to DocuSign.
+4. Note the **DocuSign User ID** (API Username) for the service account to impersonate.
 
 ### 1.3 Configure GitHub Secrets
 
-Add the following to GitHub → Settings → Environments → `compliance` → Secrets:
+Add the following to GitHub → Settings → Environments → `production` and `staging` → Secrets:
 - `DOCUSIGN_ACCOUNT_ID`
-- `DOCUSIGN_USER_ID`
-- `DOCUSIGN_INTEGRATION_KEY`
-- `DOCUSIGN_PRIVATE_KEY` (RSA private key, base64-encoded)
+- `DOCUSIGN_USER_ID` (API Username GUID)
+- `DOCUSIGN_INTEGRATION_KEY` = `54934ea2-813f-4288-8a8e-e09c293701ce`
+- `DOCUSIGN_PRIVATE_KEY` (PEM content of RSA keypair `428733c8-7467-4743-aede-3193af7620b0`)
+- `DOCUSIGN_OAUTH_HOST` (default `account.docusign.com`; FedRAMP: `account.docusign.us`)
 - `DOCUSIGN_BASE_URL` (FedRAMP base URL: `https://na4.docusign.net/restapi`)
+- `DOCUSIGN_HMAC_KEY` (shared HMAC secret for webhook verification)
 
 ---
 
