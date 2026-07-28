@@ -88,6 +88,7 @@ GitHub Actions authenticates to SharePoint using an **Azure App Registration**:
 2. If the same app registration is used for both SharePoint and mailbox automation:
    - Standardize GitHub environment secrets on `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, and `AZURE_SUBSCRIPTION_ID`
    - Keep SharePoint client-secret usage only where legacy connectors still require it
+   - If separate app registrations are preferred for security isolation, keep the SharePoint app on its existing connector-specific secrets and map the mailbox workflow to its own OIDC secret trio
 3. Under **API Permissions**, add:
    - `Sites.ReadWrite.All` (SharePoint)
    - `Files.ReadWrite.All` (OneDrive / SharePoint)
