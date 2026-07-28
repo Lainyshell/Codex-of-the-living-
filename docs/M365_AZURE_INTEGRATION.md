@@ -85,7 +85,9 @@ GitHub Actions authenticates to SharePoint using an **Azure App Registration**:
 1. In **Azure Portal → Entra ID → App Registrations**, create or extend:
    - Name: `vbtn-github-actions`
    - Supported account types: Single tenant
-2. If the same app registration is used for both SharePoint and mailbox automation, standardize the GitHub environment secret names on the generic Azure OIDC values below (`AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`) and keep SharePoint client-secret usage only where legacy connectors still require it.
+2. If the same app registration is used for both SharePoint and mailbox automation:
+   - Standardize GitHub environment secrets on `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, and `AZURE_SUBSCRIPTION_ID`
+   - Keep SharePoint client-secret usage only where legacy connectors still require it
 3. Under **API Permissions**, add:
    - `Sites.ReadWrite.All` (SharePoint)
    - `Files.ReadWrite.All` (OneDrive / SharePoint)
@@ -93,7 +95,10 @@ GitHub Actions authenticates to SharePoint using an **Azure App Registration**:
    - `LicenseAssignment.ReadWrite.All` (mailbox license assignment)
    - `Organization.Read.All` (license SKU discovery)
 4. Grant admin consent for the Microsoft Graph application permissions above.
-5. These mailbox permissions are highly privileged; keep them limited to the OIDC-backed provisioning app registration, require GitHub `compliance` environment approval, and review Entra ID audit logs after every run.
+5. These mailbox permissions are highly privileged:
+   - Limit them to the OIDC-backed provisioning app registration
+   - Require GitHub `compliance` environment approval before every run
+   - Review Entra ID audit logs after each provisioning run
 6. Store mailbox bootstrap passwords in **Azure Key Vault** (for example `MAILBOX-OPS-PASSWORD`) and reference them from the manual provisioning workflow input.
 7. Note the **Application (client) ID** → GitHub Secret: `AZURE_CLIENT_ID`
 8. Note the **Directory (tenant) ID** → GitHub Secret: `AZURE_TENANT_ID`

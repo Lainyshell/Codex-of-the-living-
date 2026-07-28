@@ -66,19 +66,18 @@ class TestProvisionMailboxes(unittest.TestCase):
         )
 
     def test_load_requests_uses_defaults_and_normalizes_keys(self):
-        original_mailboxes_json = os.environ.get("MAILBOXES_JSON")
         original_usage = pm.DEFAULT_USAGE_LOCATION
         pm.DEFAULT_USAGE_LOCATION = "US"
-        os.environ["MAILBOXES_JSON"] = (
-            '[{"userPrincipalName":"ops@verdigris.org","displayName":"Ops","licenseSkuPartNumbers":"sku-one, sku-two"}]'
-        )
         try:
-            payload = pm.load_requests()
+            with patch.dict(
+                os.environ,
+                {
+                    "MAILBOXES_JSON": '[{"userPrincipalName":"ops@verdigris.org","displayName":"Ops","licenseSkuPartNumbers":"sku-one, sku-two"}]'
+                },
+                clear=False,
+            ):
+                payload = pm.load_requests()
         finally:
-            if original_mailboxes_json is None:
-                os.environ.pop("MAILBOXES_JSON", None)
-            else:
-                os.environ["MAILBOXES_JSON"] = original_mailboxes_json
             pm.DEFAULT_USAGE_LOCATION = original_usage
 
         self.assertEqual(payload[0]["user_principal_name"], "ops@verdigris.org")

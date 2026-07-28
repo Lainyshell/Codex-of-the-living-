@@ -171,7 +171,7 @@ def normalize_request(item, index):
     field_aliases = {
         "display_name": ("display_name", "displayName"),
         "given_name": ("given_name", "givenName"),
-        "surname": ("surname", "surName"),
+        "surname": ("surname", "last_name", "lastName"),
         "job_title": ("job_title", "jobTitle"),
         "department": ("department",),
         "usage_location": ("usage_location", "usageLocation"),
@@ -190,7 +190,12 @@ def normalize_request(item, index):
         "user_principal_name": user_principal_name,
         "display_name": display_name,
         "given_name": (item.get("given_name") or item.get("givenName") or "").strip(),
-        "surname": (item.get("surname") or item.get("surName") or "").strip(),
+        "surname": (
+            item.get("surname")
+            or item.get("last_name")
+            or item.get("lastName")
+            or ""
+        ).strip(),
         "job_title": (item.get("job_title") or item.get("jobTitle") or "").strip(),
         "department": (item.get("department") or "").strip(),
         "usage_location": usage_location,
@@ -220,9 +225,6 @@ def normalize_request(item, index):
 
 def run_az(*args):
     argv = [str(arg) for arg in args]
-    for arg in argv:
-        if "\x00" in arg or "\n" in arg or "\r" in arg:
-            raise ValidationError("Azure CLI arguments must not contain control characters.")
     result = subprocess.run(
         ["az", *argv],
         capture_output=True,
