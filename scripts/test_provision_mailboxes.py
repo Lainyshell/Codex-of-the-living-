@@ -84,6 +84,7 @@ class TestProvisionMailboxes(unittest.TestCase):
                 "license_sku_part_numbers": ["EXCHANGESTANDARD"],
                 "password": None,
                 "password_secret_name": "",
+                "provided_fields": {"display_name", "given_name", "surname", "job_title", "department", "usage_location", "account_enabled", "license_sku_part_numbers"},
             }
         ]
 
@@ -125,6 +126,7 @@ class TestProvisionMailboxes(unittest.TestCase):
                 "license_sku_part_numbers": ["EXCHANGESTANDARD"],
                 "password": None,
                 "password_secret_name": "",
+                "provided_fields": {"display_name", "given_name", "surname", "job_title", "department", "usage_location", "account_enabled", "license_sku_part_numbers"},
             }
         ]
 
@@ -152,11 +154,39 @@ class TestProvisionMailboxes(unittest.TestCase):
                 "license_sku_part_numbers": [],
                 "password": None,
                 "password_secret_name": "",
+                "provided_fields": {"display_name", "given_name", "surname", "job_title", "department", "usage_location", "account_enabled"},
             }
         ]
 
         with self.assertRaises(pm.ValidationError):
             pm.provision_mailboxes(client, requests, dry_run=False)
+
+    def test_build_patch_payload_can_clear_explicitly_provided_optional_fields(self):
+        existing_user = {
+            "displayName": "Operations",
+            "givenName": "Ops",
+            "surname": "Mailbox",
+            "jobTitle": "Analyst",
+            "department": "Legacy",
+            "usageLocation": "US",
+            "accountEnabled": True,
+        }
+        mailbox = {
+            "display_name": "Operations",
+            "given_name": "Ops",
+            "surname": "Mailbox",
+            "job_title": "",
+            "department": "",
+            "usage_location": "US",
+            "account_enabled": False,
+            "provided_fields": {"display_name", "job_title", "department", "account_enabled"},
+        }
+
+        payload = pm.build_patch_payload(existing_user, mailbox)
+
+        self.assertEqual(payload["jobTitle"], "")
+        self.assertEqual(payload["department"], "")
+        self.assertFalse(payload["accountEnabled"])
 
 
 if __name__ == "__main__":

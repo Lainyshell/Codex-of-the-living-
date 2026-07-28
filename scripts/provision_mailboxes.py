@@ -155,6 +155,25 @@ def normalize_request(item, index):
     if not usage_location:
         raise ValidationError(f"Mailbox request #{index} is missing usage_location.")
 
+    provided_fields = set()
+    field_aliases = {
+        "display_name": ("display_name", "displayName"),
+        "given_name": ("given_name", "givenName"),
+        "surname": ("surname", "surName"),
+        "job_title": ("job_title", "jobTitle"),
+        "department": ("department",),
+        "usage_location": ("usage_location", "usageLocation"),
+        "mail_nickname": ("mail_nickname", "mailNickname"),
+        "account_enabled": ("account_enabled",),
+        "force_change_password_next_sign_in": ("force_change_password_next_sign_in",),
+        "license_sku_part_numbers": ("license_sku_part_numbers", "licenseSkuPartNumbers"),
+        "password": ("password",),
+        "password_secret_name": ("password_secret_name", "passwordSecretName"),
+    }
+    for normalized_name, aliases in field_aliases.items():
+        if any(alias in item for alias in aliases):
+            provided_fields.add(normalized_name)
+
     return {
         "user_principal_name": user_principal_name,
         "display_name": display_name,
@@ -183,6 +202,7 @@ def normalize_request(item, index):
         "password_secret_name": (
             item.get("password_secret_name") or item.get("passwordSecretName") or ""
         ).strip(),
+        "provided_fields": provided_fields,
     }
 
 
@@ -294,12 +314,22 @@ def build_patch_payload(existing_user, mailbox):
         "usageLocation": mailbox["usage_location"],
         "accountEnabled": mailbox["account_enabled"],
     }
+    mutable_fields = {
+        "displayName": "display_name",
+        "givenName": "given_name",
+        "surname": "surname",
+        "jobTitle": "job_title",
+        "department": "department",
+        "usageLocation": "usage_location",
+        "accountEnabled": "account_enabled",
+    }
     payload = {}
     for field_name, desired_value in field_map.items():
+        normalized_name = mutable_fields[field_name]
+        if normalized_name not in mailbox.get("provided_fields", {"display_name", "usage_location"}):
+            continue
         current_value = existing_user.get(field_name)
-        if desired_value != current_value and desired_value != "":
-            payload[field_name] = desired_value
-        if field_name == "accountEnabled" and desired_value != current_value:
+        if desired_value != current_value:
             payload[field_name] = desired_value
     return payload
 
