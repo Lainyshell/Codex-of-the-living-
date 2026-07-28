@@ -5,6 +5,8 @@ Expected environment variables:
 - AZURE_CLOUD: Azure CLI cloud name, defaults to AzureUSGovernment.
 - DEFAULT_USAGE_LOCATION: fallback location for new mailbox users.
 - AZURE_KEY_VAULT_NAME: optional vault used to resolve password_secret_name values.
+- MAILBOXES_JSON: inline JSON array of mailbox requests for workflow_dispatch runs.
+- MAILBOX_REQUESTS_FILE: optional repository path to a JSON request file.
 """
 
 import json
