@@ -92,10 +92,11 @@ GitHub Actions authenticates to SharePoint using an **Azure App Registration**:
    - `LicenseAssignment.ReadWrite.All` (mailbox license assignment)
    - `Organization.Read.All` (license SKU discovery)
 3. Grant admin consent for the Microsoft Graph application permissions above.
-4. Store mailbox bootstrap passwords in **Azure Key Vault** (for example `MAILBOX-OPS-PASSWORD`) and reference them from the manual provisioning workflow input.
-5. Note the **Application (client) ID** → GitHub Secret: `AZURE_CLIENT_ID`
-6. Note the **Directory (tenant) ID** → GitHub Secret: `AZURE_TENANT_ID`
-7. Note the **Subscription ID** → GitHub Secret: `AZURE_SUBSCRIPTION_ID`
+4. These mailbox permissions are highly privileged; keep them limited to the OIDC-backed provisioning app registration, require GitHub `compliance` environment approval, and review Entra ID audit logs after every run.
+5. Store mailbox bootstrap passwords in **Azure Key Vault** (for example `MAILBOX-OPS-PASSWORD`) and reference them from the manual provisioning workflow input.
+6. Note the **Application (client) ID** → GitHub Secret: `AZURE_CLIENT_ID`
+7. Note the **Directory (tenant) ID** → GitHub Secret: `AZURE_TENANT_ID`
+8. Note the **Subscription ID** → GitHub Secret: `AZURE_SUBSCRIPTION_ID`
 
 ---
 

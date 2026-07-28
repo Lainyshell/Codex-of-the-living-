@@ -1,3 +1,12 @@
+"""Provision Azure Government Microsoft 365 mailboxes via Microsoft Graph.
+
+Expected environment variables:
+- GRAPH_BASE_URL / GRAPH_RESOURCE: Azure Government Microsoft Graph endpoints.
+- AZURE_CLOUD: Azure CLI cloud name, defaults to AzureUSGovernment.
+- DEFAULT_USAGE_LOCATION: fallback location for new mailbox users.
+- AZURE_KEY_VAULT_NAME: optional vault used to resolve password_secret_name values.
+"""
+
 import json
 import os
 import re
@@ -10,6 +19,7 @@ GRAPH_RESOURCE = os.environ.get("GRAPH_RESOURCE", "https://graph.microsoft.us/")
 AZURE_CLOUD = os.environ.get("AZURE_CLOUD", "AzureUSGovernment")
 DEFAULT_USAGE_LOCATION = os.environ.get("DEFAULT_USAGE_LOCATION", "US").strip()
 AZURE_KEY_VAULT_NAME = os.environ.get("AZURE_KEY_VAULT_NAME", "").strip()
+ALWAYS_PROVIDED_UPDATE_FIELDS = {"display_name"}
 
 
 class ValidationError(RuntimeError):
@@ -207,15 +217,19 @@ def normalize_request(item, index):
 
 
 def run_az(*args):
+    argv = [str(arg) for arg in args]
+    for arg in argv:
+        if "\x00" in arg or "\n" in arg or "\r" in arg:
+            raise ValidationError("Azure CLI arguments must not contain control characters.")
     result = subprocess.run(
-        ["az", *args],
+        ["az", *argv],
         capture_output=True,
         check=False,
         text=True,
     )
     if result.returncode != 0:
         stderr = result.stderr.strip() or result.stdout.strip()
-        raise RuntimeError(f"Azure CLI command failed: az {' '.join(args)}\n{stderr}")
+        raise RuntimeError(f"Azure CLI command failed: az {' '.join(argv)}\n{stderr}")
     return result.stdout.strip()
 
 
@@ -326,7 +340,7 @@ def build_patch_payload(existing_user, mailbox):
     payload = {}
     for field_name, desired_value in field_map.items():
         normalized_name = mutable_fields[field_name]
-        if normalized_name not in mailbox.get("provided_fields", {"display_name", "usage_location"}):
+        if normalized_name not in mailbox.get("provided_fields", ALWAYS_PROVIDED_UPDATE_FIELDS):
             continue
         current_value = existing_user.get(field_name)
         if desired_value != current_value:

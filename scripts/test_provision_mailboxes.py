@@ -1,12 +1,24 @@
 import os
 import sys
 import unittest
+from unittest.mock import patch
 
 _SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
 if _SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, _SCRIPTS_DIR)
 
 import provision_mailboxes as pm  # noqa: E402
+
+FULL_PROVIDED_FIELDS = {
+    "display_name",
+    "given_name",
+    "surname",
+    "job_title",
+    "department",
+    "usage_location",
+    "account_enabled",
+    "license_sku_part_numbers",
+}
 
 
 class FakeGraphClient:
@@ -84,7 +96,7 @@ class TestProvisionMailboxes(unittest.TestCase):
                 "license_sku_part_numbers": ["EXCHANGESTANDARD"],
                 "password": None,
                 "password_secret_name": "",
-                "provided_fields": {"display_name", "given_name", "surname", "job_title", "department", "usage_location", "account_enabled", "license_sku_part_numbers"},
+                "provided_fields": FULL_PROVIDED_FIELDS,
             }
         ]
 
@@ -126,7 +138,7 @@ class TestProvisionMailboxes(unittest.TestCase):
                 "license_sku_part_numbers": ["EXCHANGESTANDARD"],
                 "password": None,
                 "password_secret_name": "",
-                "provided_fields": {"display_name", "given_name", "surname", "job_title", "department", "usage_location", "account_enabled", "license_sku_part_numbers"},
+                "provided_fields": FULL_PROVIDED_FIELDS,
             }
         ]
 
@@ -154,7 +166,7 @@ class TestProvisionMailboxes(unittest.TestCase):
                 "license_sku_part_numbers": [],
                 "password": None,
                 "password_secret_name": "",
-                "provided_fields": {"display_name", "given_name", "surname", "job_title", "department", "usage_location", "account_enabled"},
+                "provided_fields": FULL_PROVIDED_FIELDS - {"license_sku_part_numbers"},
             }
         ]
 
@@ -187,6 +199,52 @@ class TestProvisionMailboxes(unittest.TestCase):
         self.assertEqual(payload["jobTitle"], "")
         self.assertEqual(payload["department"], "")
         self.assertFalse(payload["accountEnabled"])
+
+    def test_resolve_password_requires_key_vault_name_for_secret_reference(self):
+        mailbox = {
+            "user_principal_name": "ops@verdigris.org",
+            "password": None,
+            "password_secret_name": "MAILBOX-OPS-PASSWORD",
+        }
+        original_vault_name = pm.AZURE_KEY_VAULT_NAME
+        pm.AZURE_KEY_VAULT_NAME = ""
+        try:
+            with self.assertRaises(pm.ValidationError):
+                pm.resolve_password(mailbox, dry_run=False)
+        finally:
+            pm.AZURE_KEY_VAULT_NAME = original_vault_name
+
+    def test_resolve_password_reads_key_vault_secret(self):
+        mailbox = {
+            "user_principal_name": "ops@verdigris.org",
+            "password": None,
+            "password_secret_name": "MAILBOX-OPS-PASSWORD",
+        }
+        original_vault_name = pm.AZURE_KEY_VAULT_NAME
+        pm.AZURE_KEY_VAULT_NAME = "vbtn-github-secrets"
+        try:
+            with patch.object(pm, "run_az", return_value="SecretPass123!") as run_az:
+                password = pm.resolve_password(mailbox, dry_run=False)
+        finally:
+            pm.AZURE_KEY_VAULT_NAME = original_vault_name
+
+        self.assertEqual(password, "SecretPass123!")
+        run_az.assert_called_once()
+
+    def test_resolve_password_surfaces_key_vault_lookup_failures(self):
+        mailbox = {
+            "user_principal_name": "ops@verdigris.org",
+            "password": None,
+            "password_secret_name": "MAILBOX-OPS-PASSWORD",
+        }
+        original_vault_name = pm.AZURE_KEY_VAULT_NAME
+        pm.AZURE_KEY_VAULT_NAME = "vbtn-github-secrets"
+        try:
+            with patch.object(pm, "run_az", side_effect=RuntimeError("secret not found")):
+                with self.assertRaises(RuntimeError):
+                    pm.resolve_password(mailbox, dry_run=False)
+        finally:
+            pm.AZURE_KEY_VAULT_NAME = original_vault_name
 
 
 if __name__ == "__main__":
