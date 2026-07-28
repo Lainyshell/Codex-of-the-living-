@@ -164,7 +164,7 @@ jobs:
           set -euo pipefail
           az cloud set --name "${{ env.AZURE_CLOUD }}"
           if ! az account show --output none 2>/dev/null; then
-            echo "Azure login did not establish a valid session. Check that credentials are correct and OIDC federation is configured."
+            echo "Azure login did not establish a valid session. Check that credentials are correct and authentication is properly configured."
             exit 1
           fi
 
@@ -354,7 +354,7 @@ jobs:
           set -euo pipefail
           az cloud set --name "${{ env.AZURE_CLOUD }}"
           if ! az account show --output none 2>/dev/null; then
-            echo "Azure login did not establish a valid session. Check that credentials are correct and OIDC federation is configured."
+            echo "Azure login did not establish a valid session. Check that credentials are correct and authentication is properly configured."
             exit 1
           fi
 
