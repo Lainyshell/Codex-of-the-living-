@@ -92,7 +92,7 @@ jobs:
     needs: build
     environment:
       name: staging
-      url: ${{ steps.deploy.outputs.webapp-url }}
+      url: ${{ steps.deploy_metadata.outputs.webapp_url }}
     steps:
       - name: Validate staging deployment configuration
         id: staging_auth
@@ -196,7 +196,7 @@ jobs:
 
       - name: Deploy staging image (Azure login)
         if: ${{ steps.staging_auth.outputs.auth_mode != 'publish-profile' }}
-        id: deploy
+        id: deploy_login
         uses: azure/webapps-deploy@v2
         with:
           app-name: ${{ steps.staging_inputs.outputs.app_name }}
@@ -204,16 +204,21 @@ jobs:
 
       - name: Deploy staging image (publish profile)
         if: ${{ steps.staging_auth.outputs.auth_mode == 'publish-profile' }}
-        id: deploy
+        id: deploy_publish_profile
         uses: azure/webapps-deploy@v2
         with:
           app-name: ${{ steps.staging_inputs.outputs.app_name }}
           publish-profile: ${{ steps.staging_inputs.outputs.publish_profile }}
           images: ${{ needs.build.outputs.image_ref }}
 
+      - name: Capture staging deployment metadata
+        id: deploy_metadata
+        run: |
+          echo "webapp_url=${{ steps.deploy_login.outputs.webapp-url || steps.deploy_publish_profile.outputs.webapp-url }}" >> "$GITHUB_OUTPUT"
+
       - name: Staging smoke test (/ and /rates)
         env:
-          BASE_URL: ${{ steps.deploy.outputs.webapp-url }}
+          BASE_URL: ${{ steps.deploy_metadata.outputs.webapp_url }}
           APP_NAME: ${{ steps.staging_inputs.outputs.app_name }}
           DEFAULT_HOSTNAME_SUFFIX: ${{ vars.AZURE_WEBAPP_DEFAULT_HOSTNAME_SUFFIX || env.DEFAULT_WEBAPP_HOSTNAME_SUFFIX }}
         run: |
@@ -259,7 +264,7 @@ jobs:
     needs: [build, deploy-staging]
     environment:
       name: production
-      url: ${{ steps.deploy.outputs.webapp-url }}
+      url: ${{ steps.deploy_metadata.outputs.webapp_url }}
     steps:
       - name: Validate production deployment configuration
         id: production_auth
@@ -363,7 +368,7 @@ jobs:
 
       - name: Deploy production image (Azure login)
         if: ${{ steps.production_auth.outputs.auth_mode != 'publish-profile' }}
-        id: deploy
+        id: deploy_login
         uses: azure/webapps-deploy@v2
         with:
           app-name: ${{ steps.production_inputs.outputs.app_name }}
@@ -371,18 +376,23 @@ jobs:
 
       - name: Deploy production image (publish profile)
         if: ${{ steps.production_auth.outputs.auth_mode == 'publish-profile' }}
-        id: deploy
+        id: deploy_publish_profile
         uses: azure/webapps-deploy@v2
         with:
           app-name: ${{ steps.production_inputs.outputs.app_name }}
           publish-profile: ${{ steps.production_inputs.outputs.publish_profile }}
           images: ${{ needs.build.outputs.image_ref }}
 
+      - name: Capture production deployment metadata
+        id: deploy_metadata
+        run: |
+          echo "webapp_url=${{ steps.deploy_login.outputs.webapp-url || steps.deploy_publish_profile.outputs.webapp-url }}" >> "$GITHUB_OUTPUT"
+
       - name: Production smoke test (/ and /rates)
         id: smoke
         continue-on-error: true
         env:
-          BASE_URL: ${{ steps.deploy.outputs.webapp-url }}
+          BASE_URL: ${{ steps.deploy_metadata.outputs.webapp_url }}
           APP_NAME: ${{ steps.production_inputs.outputs.app_name }}
           DEFAULT_HOSTNAME_SUFFIX: ${{ vars.AZURE_WEBAPP_DEFAULT_HOSTNAME_SUFFIX || env.DEFAULT_WEBAPP_HOSTNAME_SUFFIX }}
         run: |
