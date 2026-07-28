@@ -82,17 +82,28 @@ See Section 4 (Power Automate) for flow configuration details.
 
 GitHub Actions authenticates to SharePoint using an **Azure App Registration**:
 
-1. In **Azure Portal → Entra ID → App Registrations**, create:
+1. In **Azure Portal → Entra ID → App Registrations**, create or extend:
    - Name: `vbtn-github-actions`
    - Supported account types: Single tenant
-2. Under **API Permissions**, add:
+2. If the same app registration is used for both SharePoint and mailbox automation:
+   - Standardize GitHub environment secrets on `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, and `AZURE_SUBSCRIPTION_ID`
+   - Keep SharePoint client-secret usage only where legacy connectors still require it
+   - If separate app registrations are preferred for security isolation, keep the SharePoint app on its existing connector-specific secrets and map the mailbox workflow to its own OIDC secret trio
+3. Under **API Permissions**, add:
    - `Sites.ReadWrite.All` (SharePoint)
    - `Files.ReadWrite.All` (OneDrive / SharePoint)
-3. Create a **Client Secret** and store in:
-   - Azure Key Vault: `vbtn-github-secrets`
-   - GitHub Secret: `SHAREPOINT_CLIENT_SECRET`
-4. Note the **Application (client) ID** → GitHub Secret: `SHAREPOINT_CLIENT_ID`
-5. Note the **Directory (tenant) ID** → GitHub Secret: `AZURE_TENANT_ID`
+   - `User.ReadWrite.All` (tenant mailbox user creation and updates)
+   - `LicenseAssignment.ReadWrite.All` (mailbox license assignment)
+   - `Organization.Read.All` (license SKU discovery)
+4. Grant admin consent for the Microsoft Graph application permissions above.
+5. These mailbox permissions are highly privileged:
+   - Limit them to the OIDC-backed provisioning app registration
+   - Require GitHub `compliance` environment approval before every run
+   - Review Entra ID audit logs after each provisioning run
+6. Store mailbox bootstrap passwords in **Azure Key Vault** (for example `MAILBOX-OPS-PASSWORD`) and reference them from the manual provisioning workflow input.
+7. Note the **Application (client) ID** → GitHub Secret: `AZURE_CLIENT_ID`
+8. Note the **Directory (tenant) ID** → GitHub Secret: `AZURE_TENANT_ID`
+9. Note the **Subscription ID** → GitHub Secret: `AZURE_SUBSCRIPTION_ID`
 
 ---
 
@@ -163,6 +174,36 @@ The following Power Automate flows support the VBTN compliance pipeline. All flo
    - Headers: `Authorization: token <GITHUB_PAT>`, `Accept: application/vnd.github.v3+json`
    - Body: `{"event_type": "compliance-review", "client_payload": {"document": "<name>"}}`
 4. Store the GitHub PAT in **Azure Key Vault** and reference via Power Automate **Key Vault connector**.
+
+### Manual Tenant Mailbox Provisioning Workflow
+
+`/.github/workflows/provision-tenant-mailboxes.yml` provides a manual, approval-gated workflow for creating or updating Exchange-backed Microsoft 365 users in the VBTN tenant.
+
+- **Trigger**: `workflow_dispatch` only
+- **Approval gate**: GitHub `compliance` environment reviewer
+- **Cloud**: `AzureUSGovernment`
+- **Script**: `scripts/provision_mailboxes.py`
+- **Microsoft Graph base URL**: `https://graph.microsoft.us/v1.0`
+
+Provide a JSON array in the `mailboxes_json` workflow input. Each mailbox entry supports:
+
+```json
+[
+  {
+    "user_principal_name": "operations@verdigrisbotanicanation.org",
+    "display_name": "VBTN Operations",
+    "given_name": "VBTN",
+    "surname": "Operations",
+    "department": "Operations",
+    "job_title": "Operations Mailbox",
+    "usage_location": "US",
+    "license_sku_part_numbers": ["EXCHANGESTANDARD"],
+    "password_secret_name": "MAILBOX-OPERATIONS-PASSWORD"
+  }
+]
+```
+
+Use `dry_run=true` first to preview create/update and license-assignment actions before making tenant changes.
 
 ---
 

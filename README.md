@@ -87,11 +87,14 @@ The application connects to the official U.S. Treasury Fiscal Data API:
 │   ├── requirements.txt  # Python dependencies (uwsgi, flask, requests)
 │   ├── Dockerfile        # Docker container configuration
 │   └── .gitignore        # Python-specific gitignore rules
+├── scripts/
+│   └── provision_mailboxes.py # Microsoft 365 tenant mailbox provisioning utility
 ├── compose.yaml          # Docker Compose configuration
 └── .github/
     └── workflows/
-        ├── azure-container-webapp.yml  # Build + staged Azure release workflow
-        └── operations-observability.yml # Operations dashboard and alerting workflow
+        ├── azure-container-webapp.yml        # Build + staged Azure release workflow
+        ├── operations-observability.yml      # Operations dashboard and alerting workflow
+        └── provision-tenant-mailboxes.yml    # Manual tenant mailbox provisioning workflow
 ```
 
 ## Running Locally
@@ -147,6 +150,7 @@ The repository uses a single production app deployment workflow:
 
 - **Release workflow**: `.github/workflows/azure-container-webapp.yml`
 - **Observability workflow**: `.github/workflows/operations-observability.yml`
+- **Mailbox provisioning workflow**: `.github/workflows/provision-tenant-mailboxes.yml`
 - **Deployment/operations standard**: [`docs/DEPLOYMENT_OPERATIONS_STANDARD.md`](docs/DEPLOYMENT_OPERATIONS_STANDARD.md)
 
 The release workflow builds from `app/Dockerfile`, deploys staging then production, runs post-deploy smoke checks on `/` and `/rates`, and attempts rollback to the previous image tag if production smoke checks fail.
