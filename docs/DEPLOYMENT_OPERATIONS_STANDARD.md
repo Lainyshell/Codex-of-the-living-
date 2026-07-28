@@ -134,12 +134,11 @@ Structured telemetry records include:
 Execute this drill before declaring production ready:
 
 1. Merge a PR into `main`.
-2. Verify the OIDC identity has federated credentials for the GitHub repository/environment pair and can read the deployment Key Vault.
-3. Run a staging activation deployment and verify full release workflow success in order: build → staging → production.
-4. Confirm smoke checks pass for `/` and `/rates`.
-5. Confirm Operations Observability summary reflects healthy state.
-6. Validate alert path by inducing a non-destructive synthetic failure in staging or via threshold override.
-7. Validate rollback path by forcing a failed production smoke check and confirming previous image redeploy.
-8. Archive run links and artifacts for audit traceability.
+2. Run a staging activation deployment and verify the OIDC identity has federated credentials for the GitHub repository/environment pair, can read the deployment Key Vault, and the full release workflow succeeds in order: build → staging → production.
+3. Confirm smoke checks pass for `/` and `/rates`.
+4. Confirm Operations Observability summary reflects healthy state.
+5. Validate alert path by inducing a non-destructive synthetic failure in staging or via threshold override.
+6. Validate rollback path by forcing a failed production smoke check and confirming previous image redeploy.
+7. Archive run links and artifacts for audit traceability.
 
 If all checks pass, this document is the frozen deployment standard for future releases.
