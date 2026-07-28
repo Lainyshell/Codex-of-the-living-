@@ -41,13 +41,26 @@ For controlled promotion, configure required reviewers on `production`.
 ### Required Variables and Secrets
 
 Repository/Environment variables:
-- `AZURE_WEBAPP_NAME_STAGING`
-- `AZURE_WEBAPP_NAME_PRODUCTION`
+- `AZURE_KEY_VAULT_NAME`
+- `AZURE_WEBAPP_NAME_STAGING` or `AZURE_WEBAPP_NAME_STAGING_SECRET_NAME`
+- `AZURE_WEBAPP_NAME_PRODUCTION` or `AZURE_WEBAPP_NAME_PRODUCTION_SECRET_NAME`
+- `AZURE_WEBAPP_DEFAULT_HOSTNAME_SUFFIX` (default `azurewebsites.us` for Azure Government)
 - `PRODUCTION_BASE_URL` (used by observability workflow)
 
 Environment secrets:
+- `AZURE_CLIENT_ID`
+- `AZURE_TENANT_ID`
+- `AZURE_SUBSCRIPTION_ID`
+
+Optional fallback secrets:
+- `AZURE_CREDENTIALS`
 - `AZURE_WEBAPP_PUBLISH_PROFILE_STAGING`
 - `AZURE_WEBAPP_PUBLISH_PROFILE_PRODUCTION`
+
+Optional Azure Key Vault secret-name variables:
+- `AZURE_WEBAPP_NAME_SECRET_NAME`
+- `AZURE_WEBAPP_PUBLISH_PROFILE_STAGING_SECRET_NAME`
+- `AZURE_WEBAPP_PUBLISH_PROFILE_PRODUCTION_SECRET_NAME`
 
 Optional alert webhook secrets:
 - `TEAMS_WEBHOOK_URL`
@@ -110,7 +123,8 @@ Structured telemetry records include:
 
 - Deployment image build context is `./app` only.
 - Tribal governance documents in repository root are excluded from app container build.
-- Secrets are managed through GitHub Environments and/or Azure Key Vault.
+- Azure Government deployments default to `AzureUSGovernment` and use GitHub OIDC (`id-token: write`) for Azure login.
+- Secrets should live in Azure Key Vault, with GitHub environment secrets reserved for OIDC metadata and break-glass fallback credentials.
 - Compliance workflow HITL controls remain active and unchanged.
 
 ---
@@ -120,7 +134,7 @@ Structured telemetry records include:
 Execute this drill before declaring production ready:
 
 1. Merge a PR into `main`.
-2. Verify full release workflow success in order: build → staging → production.
+2. Run a staging activation deployment and verify the OIDC identity has federated credentials for the GitHub repository/environment pair, can read the deployment Key Vault, and the full release workflow succeeds in order: build → staging → production.
 3. Confirm smoke checks pass for `/` and `/rates`.
 4. Confirm Operations Observability summary reflects healthy state.
 5. Validate alert path by inducing a non-destructive synthetic failure in staging or via threshold override.

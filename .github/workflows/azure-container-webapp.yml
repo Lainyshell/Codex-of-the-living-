@@ -15,6 +15,8 @@ concurrency:
   cancel-in-progress: false
 
 env:
+  AZURE_CLOUD: AzureUSGovernment
+  DEFAULT_WEBAPP_HOSTNAME_SUFFIX: azurewebsites.us
   IMAGE_NAME: vbtn-treasury-api
   NULL_SHA: "0000000000000000000000000000000000000000"
   RATE_LATENCY_THRESHOLD_MS: "5000"
@@ -90,36 +92,54 @@ jobs:
     needs: build
     environment:
       name: staging
-      url: ${{ steps.deploy.outputs.webapp-url }}
+      url: ${{ steps.deploy_metadata.outputs.webapp_url }}
     steps:
-      - name: Validate staging deployment credentials
+      - name: Validate staging deployment configuration
         id: staging_auth
         env:
           APP_NAME: ${{ vars.AZURE_WEBAPP_NAME_STAGING || vars.AZURE_WEBAPP_NAME }}
+          APP_NAME_SECRET_NAME: ${{ vars.AZURE_WEBAPP_NAME_STAGING_SECRET_NAME || vars.AZURE_WEBAPP_NAME_SECRET_NAME }}
+          KEY_VAULT_NAME: ${{ vars.AZURE_KEY_VAULT_NAME }}
           PUBLISH_PROFILE: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE_STAGING || secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+          PUBLISH_PROFILE_SECRET_NAME: ${{ vars.AZURE_WEBAPP_PUBLISH_PROFILE_STAGING_SECRET_NAME || vars.AZURE_WEBAPP_PUBLISH_PROFILE_SECRET_NAME }}
           CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS }}
         run: |
           set -euo pipefail
-          if [ -z "${APP_NAME}" ]; then
-            echo "Missing required app name variable. Set AZURE_WEBAPP_NAME_STAGING (or AZURE_WEBAPP_NAME)."
-            exit 1
+          HAS_OIDC_LOGIN=false
+          HAS_AZURE_LOGIN=false
+          if [ -n "${CLIENT_ID}" ] && [ -n "${TENANT_ID}" ] && [ -n "${SUBSCRIPTION_ID}" ]; then
+            HAS_OIDC_LOGIN=true
+            HAS_AZURE_LOGIN=true
+          elif [ -n "${AZURE_CREDENTIALS}" ]; then
+            HAS_AZURE_LOGIN=true
           fi
           AUTH_MODE=""
-          if [ -n "${PUBLISH_PROFILE}" ]; then
-            AUTH_MODE="publish-profile"
+          if [ "${HAS_OIDC_LOGIN}" = "true" ]; then
+            AUTH_MODE="oidc"
           elif [ -n "${AZURE_CREDENTIALS}" ]; then
             AUTH_MODE="service-principal-json"
-          elif [ -n "${CLIENT_ID}" ] && [ -n "${TENANT_ID}" ] && [ -n "${SUBSCRIPTION_ID}" ]; then
-            AUTH_MODE="oidc"
+          elif [ -n "${PUBLISH_PROFILE}" ]; then
+            AUTH_MODE="publish-profile"
           fi
           if [ -z "${AUTH_MODE}" ]; then
-            echo "Missing Azure deploy credentials. Configure AZURE_WEBAPP_PUBLISH_PROFILE_STAGING/AZURE_WEBAPP_PUBLISH_PROFILE, or AZURE_CREDENTIALS, or AZURE_CLIENT_ID + AZURE_TENANT_ID + AZURE_SUBSCRIPTION_ID."
+            echo "Missing Azure deploy credentials. Configure AZURE_CLIENT_ID + AZURE_TENANT_ID + AZURE_SUBSCRIPTION_ID, or AZURE_CREDENTIALS, or AZURE_WEBAPP_PUBLISH_PROFILE_STAGING/AZURE_WEBAPP_PUBLISH_PROFILE."
             exit 1
           fi
-          echo "app_name=${APP_NAME}" >> "$GITHUB_OUTPUT"
+          if [ -z "${APP_NAME}" ] && [ -z "${APP_NAME_SECRET_NAME}" ]; then
+            echo "Missing staging app name. Set AZURE_WEBAPP_NAME_STAGING/AZURE_WEBAPP_NAME or configure AZURE_WEBAPP_NAME_STAGING_SECRET_NAME/AZURE_WEBAPP_NAME_SECRET_NAME."
+            exit 1
+          fi
+          if [ -z "${KEY_VAULT_NAME}" ] && { [ -n "${APP_NAME_SECRET_NAME}" ] || [ -n "${PUBLISH_PROFILE_SECRET_NAME}" ]; }; then
+            echo "Azure Key Vault secret names were configured without AZURE_KEY_VAULT_NAME."
+            exit 1
+          fi
+          if [ -n "${KEY_VAULT_NAME}" ] && [ "${HAS_AZURE_LOGIN}" = "false" ] && { [ -n "${APP_NAME_SECRET_NAME}" ] || [ -n "${PUBLISH_PROFILE_SECRET_NAME}" ]; }; then
+            echo "Azure Key Vault secret resolution requires OIDC or service principal login."
+            exit 1
+          fi
           echo "auth_mode=${AUTH_MODE}" >> "$GITHUB_OUTPUT"
 
       - name: Azure login (service principal JSON)
@@ -127,6 +147,7 @@ jobs:
         uses: azure/login@v2
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
+          environment: ${{ env.AZURE_CLOUD }}
 
       - name: Azure login (OIDC)
         if: ${{ steps.staging_auth.outputs.auth_mode == 'oidc' }}
@@ -135,22 +156,82 @@ jobs:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          environment: ${{ env.AZURE_CLOUD }}
 
-      - name: Deploy staging image
-        id: deploy
+      - name: Resolve staging deployment inputs
+        id: staging_inputs
+        env:
+          APP_NAME: ${{ vars.AZURE_WEBAPP_NAME_STAGING || vars.AZURE_WEBAPP_NAME }}
+          APP_NAME_SECRET_NAME: ${{ vars.AZURE_WEBAPP_NAME_STAGING_SECRET_NAME || vars.AZURE_WEBAPP_NAME_SECRET_NAME }}
+          KEY_VAULT_NAME: ${{ vars.AZURE_KEY_VAULT_NAME }}
+          PUBLISH_PROFILE: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE_STAGING || secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+          PUBLISH_PROFILE_SECRET_NAME: ${{ vars.AZURE_WEBAPP_PUBLISH_PROFILE_STAGING_SECRET_NAME || vars.AZURE_WEBAPP_PUBLISH_PROFILE_SECRET_NAME }}
+        run: |
+          set -euo pipefail
+          APP_NAME_RESOLVED="${APP_NAME}"
+          PUBLISH_PROFILE_RESOLVED="${PUBLISH_PROFILE}"
+
+          if [ -n "${KEY_VAULT_NAME}" ] && [ "${{ steps.staging_auth.outputs.auth_mode }}" != "publish-profile" ]; then
+            az cloud set --name "${{ env.AZURE_CLOUD }}"
+            if [ -n "${APP_NAME_SECRET_NAME}" ]; then
+              APP_NAME_RESOLVED="$(az keyvault secret show --vault-name "${KEY_VAULT_NAME}" --name "${APP_NAME_SECRET_NAME}" --query value -o tsv)"
+            fi
+            if [ -n "${PUBLISH_PROFILE_SECRET_NAME}" ]; then
+              PUBLISH_PROFILE_RESOLVED="$(az keyvault secret show --vault-name "${KEY_VAULT_NAME}" --name "${PUBLISH_PROFILE_SECRET_NAME}" --query value -o tsv)"
+            fi
+          fi
+
+          if [ -z "${APP_NAME_RESOLVED}" ]; then
+            echo "Unable to resolve staging app name."
+            exit 1
+          fi
+
+          if [ -n "${PUBLISH_PROFILE_RESOLVED}" ]; then
+            echo "::add-mask::${PUBLISH_PROFILE_RESOLVED}"
+          fi
+
+          echo "app_name=${APP_NAME_RESOLVED}" >> "$GITHUB_OUTPUT"
+          if [ -n "${PUBLISH_PROFILE_RESOLVED}" ]; then
+            echo "publish_profile_present=true" >> "$GITHUB_OUTPUT"
+            {
+              echo "publish_profile<<EOF"
+              printf '%s\n' "${PUBLISH_PROFILE_RESOLVED}"
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+          else
+            echo "publish_profile_present=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Deploy staging image (Azure login)
+        if: ${{ steps.staging_auth.outputs.auth_mode != 'publish-profile' }}
+        id: deploy_login
         uses: azure/webapps-deploy@v2
         with:
-          app-name: ${{ steps.staging_auth.outputs.app_name }}
-          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE_STAGING || secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+          app-name: ${{ steps.staging_inputs.outputs.app_name }}
           images: ${{ needs.build.outputs.image_ref }}
+
+      - name: Deploy staging image (publish profile)
+        if: ${{ steps.staging_auth.outputs.auth_mode == 'publish-profile' }}
+        id: deploy_publish_profile
+        uses: azure/webapps-deploy@v2
+        with:
+          app-name: ${{ steps.staging_inputs.outputs.app_name }}
+          publish-profile: ${{ steps.staging_inputs.outputs.publish_profile }}
+          images: ${{ needs.build.outputs.image_ref }}
+
+      - name: Capture staging deployment metadata
+        id: deploy_metadata
+        run: |
+          echo "webapp_url=${{ steps.deploy_login.outputs.webapp-url || steps.deploy_publish_profile.outputs.webapp-url }}" >> "$GITHUB_OUTPUT"
 
       - name: Staging smoke test (/ and /rates)
         env:
-          BASE_URL: ${{ steps.deploy.outputs.webapp-url }}
-          APP_NAME: ${{ steps.staging_auth.outputs.app_name }}
+          BASE_URL: ${{ steps.deploy_metadata.outputs.webapp_url }}
+          APP_NAME: ${{ steps.staging_inputs.outputs.app_name }}
+          DEFAULT_HOSTNAME_SUFFIX: ${{ vars.AZURE_WEBAPP_DEFAULT_HOSTNAME_SUFFIX || env.DEFAULT_WEBAPP_HOSTNAME_SUFFIX }}
         run: |
           set -euo pipefail
-          URL="${BASE_URL:-https://${APP_NAME}.azurewebsites.net}"
+          URL="${BASE_URL:-https://${APP_NAME}.${DEFAULT_HOSTNAME_SUFFIX}}"
 
           STATUS_BODY=$(curl -fsS "${URL}/")
           python - <<'PY' "$STATUS_BODY"
@@ -191,36 +272,54 @@ jobs:
     needs: [build, deploy-staging]
     environment:
       name: production
-      url: ${{ steps.deploy.outputs.webapp-url }}
+      url: ${{ steps.deploy_metadata.outputs.webapp_url }}
     steps:
-      - name: Validate production deployment credentials
+      - name: Validate production deployment configuration
         id: production_auth
         env:
           APP_NAME: ${{ vars.AZURE_WEBAPP_NAME_PRODUCTION || vars.AZURE_WEBAPP_NAME }}
+          APP_NAME_SECRET_NAME: ${{ vars.AZURE_WEBAPP_NAME_PRODUCTION_SECRET_NAME || vars.AZURE_WEBAPP_NAME_SECRET_NAME }}
+          KEY_VAULT_NAME: ${{ vars.AZURE_KEY_VAULT_NAME }}
           PUBLISH_PROFILE: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE_PRODUCTION || secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+          PUBLISH_PROFILE_SECRET_NAME: ${{ vars.AZURE_WEBAPP_PUBLISH_PROFILE_PRODUCTION_SECRET_NAME || vars.AZURE_WEBAPP_PUBLISH_PROFILE_SECRET_NAME }}
           CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS }}
         run: |
           set -euo pipefail
-          if [ -z "${APP_NAME}" ]; then
-            echo "Missing required app name variable. Set AZURE_WEBAPP_NAME_PRODUCTION (or AZURE_WEBAPP_NAME)."
-            exit 1
+          HAS_OIDC_LOGIN=false
+          HAS_AZURE_LOGIN=false
+          if [ -n "${CLIENT_ID}" ] && [ -n "${TENANT_ID}" ] && [ -n "${SUBSCRIPTION_ID}" ]; then
+            HAS_OIDC_LOGIN=true
+            HAS_AZURE_LOGIN=true
+          elif [ -n "${AZURE_CREDENTIALS}" ]; then
+            HAS_AZURE_LOGIN=true
           fi
           AUTH_MODE=""
-          if [ -n "${PUBLISH_PROFILE}" ]; then
-            AUTH_MODE="publish-profile"
+          if [ "${HAS_OIDC_LOGIN}" = "true" ]; then
+            AUTH_MODE="oidc"
           elif [ -n "${AZURE_CREDENTIALS}" ]; then
             AUTH_MODE="service-principal-json"
-          elif [ -n "${CLIENT_ID}" ] && [ -n "${TENANT_ID}" ] && [ -n "${SUBSCRIPTION_ID}" ]; then
-            AUTH_MODE="oidc"
+          elif [ -n "${PUBLISH_PROFILE}" ]; then
+            AUTH_MODE="publish-profile"
           fi
           if [ -z "${AUTH_MODE}" ]; then
-            echo "Missing Azure deploy credentials. Configure AZURE_WEBAPP_PUBLISH_PROFILE_PRODUCTION/AZURE_WEBAPP_PUBLISH_PROFILE, or AZURE_CREDENTIALS, or AZURE_CLIENT_ID + AZURE_TENANT_ID + AZURE_SUBSCRIPTION_ID."
+            echo "Missing Azure deploy credentials. Configure AZURE_CLIENT_ID + AZURE_TENANT_ID + AZURE_SUBSCRIPTION_ID, or AZURE_CREDENTIALS, or AZURE_WEBAPP_PUBLISH_PROFILE_PRODUCTION/AZURE_WEBAPP_PUBLISH_PROFILE."
             exit 1
           fi
-          echo "app_name=${APP_NAME}" >> "$GITHUB_OUTPUT"
+          if [ -z "${APP_NAME}" ] && [ -z "${APP_NAME_SECRET_NAME}" ]; then
+            echo "Missing production app name. Set AZURE_WEBAPP_NAME_PRODUCTION/AZURE_WEBAPP_NAME or configure AZURE_WEBAPP_NAME_PRODUCTION_SECRET_NAME/AZURE_WEBAPP_NAME_SECRET_NAME."
+            exit 1
+          fi
+          if [ -z "${KEY_VAULT_NAME}" ] && { [ -n "${APP_NAME_SECRET_NAME}" ] || [ -n "${PUBLISH_PROFILE_SECRET_NAME}" ]; }; then
+            echo "Azure Key Vault secret names were configured without AZURE_KEY_VAULT_NAME."
+            exit 1
+          fi
+          if [ -n "${KEY_VAULT_NAME}" ] && [ "${HAS_AZURE_LOGIN}" = "false" ] && { [ -n "${APP_NAME_SECRET_NAME}" ] || [ -n "${PUBLISH_PROFILE_SECRET_NAME}" ]; }; then
+            echo "Azure Key Vault secret resolution requires OIDC or service principal login."
+            exit 1
+          fi
           echo "auth_mode=${AUTH_MODE}" >> "$GITHUB_OUTPUT"
 
       - name: Azure login (service principal JSON)
@@ -228,6 +327,7 @@ jobs:
         uses: azure/login@v2
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
+          environment: ${{ env.AZURE_CLOUD }}
 
       - name: Azure login (OIDC)
         if: ${{ steps.production_auth.outputs.auth_mode == 'oidc' }}
@@ -236,24 +336,84 @@ jobs:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          environment: ${{ env.AZURE_CLOUD }}
 
-      - name: Deploy production image
-        id: deploy
+      - name: Resolve production deployment inputs
+        id: production_inputs
+        env:
+          APP_NAME: ${{ vars.AZURE_WEBAPP_NAME_PRODUCTION || vars.AZURE_WEBAPP_NAME }}
+          APP_NAME_SECRET_NAME: ${{ vars.AZURE_WEBAPP_NAME_PRODUCTION_SECRET_NAME || vars.AZURE_WEBAPP_NAME_SECRET_NAME }}
+          KEY_VAULT_NAME: ${{ vars.AZURE_KEY_VAULT_NAME }}
+          PUBLISH_PROFILE: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE_PRODUCTION || secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+          PUBLISH_PROFILE_SECRET_NAME: ${{ vars.AZURE_WEBAPP_PUBLISH_PROFILE_PRODUCTION_SECRET_NAME || vars.AZURE_WEBAPP_PUBLISH_PROFILE_SECRET_NAME }}
+        run: |
+          set -euo pipefail
+          APP_NAME_RESOLVED="${APP_NAME}"
+          PUBLISH_PROFILE_RESOLVED="${PUBLISH_PROFILE}"
+
+          if [ -n "${KEY_VAULT_NAME}" ] && [ "${{ steps.production_auth.outputs.auth_mode }}" != "publish-profile" ]; then
+            az cloud set --name "${{ env.AZURE_CLOUD }}"
+            if [ -n "${APP_NAME_SECRET_NAME}" ]; then
+              APP_NAME_RESOLVED="$(az keyvault secret show --vault-name "${KEY_VAULT_NAME}" --name "${APP_NAME_SECRET_NAME}" --query value -o tsv)"
+            fi
+            if [ -n "${PUBLISH_PROFILE_SECRET_NAME}" ]; then
+              PUBLISH_PROFILE_RESOLVED="$(az keyvault secret show --vault-name "${KEY_VAULT_NAME}" --name "${PUBLISH_PROFILE_SECRET_NAME}" --query value -o tsv)"
+            fi
+          fi
+
+          if [ -z "${APP_NAME_RESOLVED}" ]; then
+            echo "Unable to resolve production app name."
+            exit 1
+          fi
+
+          if [ -n "${PUBLISH_PROFILE_RESOLVED}" ]; then
+            echo "::add-mask::${PUBLISH_PROFILE_RESOLVED}"
+          fi
+
+          echo "app_name=${APP_NAME_RESOLVED}" >> "$GITHUB_OUTPUT"
+          if [ -n "${PUBLISH_PROFILE_RESOLVED}" ]; then
+            echo "publish_profile_present=true" >> "$GITHUB_OUTPUT"
+            {
+              echo "publish_profile<<EOF"
+              printf '%s\n' "${PUBLISH_PROFILE_RESOLVED}"
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+          else
+            echo "publish_profile_present=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Deploy production image (Azure login)
+        if: ${{ steps.production_auth.outputs.auth_mode != 'publish-profile' }}
+        id: deploy_login
         uses: azure/webapps-deploy@v2
         with:
-          app-name: ${{ steps.production_auth.outputs.app_name }}
-          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE_PRODUCTION || secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+          app-name: ${{ steps.production_inputs.outputs.app_name }}
           images: ${{ needs.build.outputs.image_ref }}
+
+      - name: Deploy production image (publish profile)
+        if: ${{ steps.production_auth.outputs.auth_mode == 'publish-profile' }}
+        id: deploy_publish_profile
+        uses: azure/webapps-deploy@v2
+        with:
+          app-name: ${{ steps.production_inputs.outputs.app_name }}
+          publish-profile: ${{ steps.production_inputs.outputs.publish_profile }}
+          images: ${{ needs.build.outputs.image_ref }}
+
+      - name: Capture production deployment metadata
+        id: deploy_metadata
+        run: |
+          echo "webapp_url=${{ steps.deploy_login.outputs.webapp-url || steps.deploy_publish_profile.outputs.webapp-url }}" >> "$GITHUB_OUTPUT"
 
       - name: Production smoke test (/ and /rates)
         id: smoke
         continue-on-error: true
         env:
-          BASE_URL: ${{ steps.deploy.outputs.webapp-url }}
-          APP_NAME: ${{ steps.production_auth.outputs.app_name }}
+          BASE_URL: ${{ steps.deploy_metadata.outputs.webapp_url }}
+          APP_NAME: ${{ steps.production_inputs.outputs.app_name }}
+          DEFAULT_HOSTNAME_SUFFIX: ${{ vars.AZURE_WEBAPP_DEFAULT_HOSTNAME_SUFFIX || env.DEFAULT_WEBAPP_HOSTNAME_SUFFIX }}
         run: |
           set -euo pipefail
-          URL="${BASE_URL:-https://${APP_NAME}.azurewebsites.net}"
+          URL="${BASE_URL:-https://${APP_NAME}.${DEFAULT_HOSTNAME_SUFFIX}}"
 
           STATUS_BODY=$(curl -fsS "${URL}/")
           python - <<'PY' "$STATUS_BODY"
@@ -298,12 +458,19 @@ jobs:
             echo "is_valid=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Roll back to previous image tag
-        if: steps.smoke.outcome == 'failure' && steps.rollback_tag.outputs.is_valid == 'true'
+      - name: Roll back to previous image tag (Azure login)
+        if: steps.smoke.outcome == 'failure' && steps.rollback_tag.outputs.is_valid == 'true' && steps.production_auth.outputs.auth_mode != 'publish-profile'
         uses: azure/webapps-deploy@v2
         with:
-          app-name: ${{ steps.production_auth.outputs.app_name }}
-          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE_PRODUCTION || secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+          app-name: ${{ steps.production_inputs.outputs.app_name }}
+          images: ghcr.io/${{ needs.build.outputs.repo_lc }}/${{ env.IMAGE_NAME }}:${{ needs.build.outputs.previous_tag }}
+
+      - name: Roll back to previous image tag (publish profile)
+        if: steps.smoke.outcome == 'failure' && steps.rollback_tag.outputs.is_valid == 'true' && steps.production_auth.outputs.auth_mode == 'publish-profile'
+        uses: azure/webapps-deploy@v2
+        with:
+          app-name: ${{ steps.production_inputs.outputs.app_name }}
+          publish-profile: ${{ steps.production_inputs.outputs.publish_profile }}
           images: ghcr.io/${{ needs.build.outputs.repo_lc }}/${{ env.IMAGE_NAME }}:${{ needs.build.outputs.previous_tag }}
 
       - name: Fail workflow when production smoke test fails
