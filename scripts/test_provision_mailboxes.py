@@ -19,6 +19,7 @@ FULL_PROVIDED_FIELDS = {
     "account_enabled",
     "license_sku_part_numbers",
 }
+PROVIDED_FIELDS_WITHOUT_LICENSES = FULL_PROVIDED_FIELDS - {"license_sku_part_numbers"}
 
 
 class FakeGraphClient:
@@ -57,6 +58,12 @@ class FakeGraphClient:
 class TestProvisionMailboxes(unittest.TestCase):
     def test_derive_mail_nickname_sanitizes_local_part(self):
         self.assertEqual(pm.derive_mail_nickname("Ops Team+1@verdigris.org"), "ops-team-1")
+        with self.assertRaises(pm.ValidationError):
+            pm.derive_mail_nickname("---@verdigris.org")
+        self.assertEqual(
+            pm.derive_mail_nickname(f"{'a' * 80}@verdigris.org"),
+            "a" * 64,
+        )
 
     def test_load_requests_uses_defaults_and_normalizes_keys(self):
         original_mailboxes_json = os.environ.get("MAILBOXES_JSON")
@@ -166,7 +173,7 @@ class TestProvisionMailboxes(unittest.TestCase):
                 "license_sku_part_numbers": [],
                 "password": None,
                 "password_secret_name": "",
-                "provided_fields": FULL_PROVIDED_FIELDS - {"license_sku_part_numbers"},
+                "provided_fields": PROVIDED_FIELDS_WITHOUT_LICENSES,
             }
         ]
 

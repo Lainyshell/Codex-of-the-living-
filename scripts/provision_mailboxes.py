@@ -21,7 +21,7 @@ GRAPH_RESOURCE = os.environ.get("GRAPH_RESOURCE", "https://graph.microsoft.us/")
 AZURE_CLOUD = os.environ.get("AZURE_CLOUD", "AzureUSGovernment")
 DEFAULT_USAGE_LOCATION = os.environ.get("DEFAULT_USAGE_LOCATION", "US").strip()
 AZURE_KEY_VAULT_NAME = os.environ.get("AZURE_KEY_VAULT_NAME", "").strip()
-ALWAYS_PROVIDED_UPDATE_FIELDS = {"display_name"}
+ALWAYS_PROVIDED_UPDATE_KEYS = {"display_name"}
 
 
 class ValidationError(RuntimeError):
@@ -342,7 +342,7 @@ def build_patch_payload(existing_user, mailbox):
     payload = {}
     for field_name, desired_value in field_map.items():
         normalized_name = mutable_fields[field_name]
-        if normalized_name not in mailbox.get("provided_fields", ALWAYS_PROVIDED_UPDATE_FIELDS):
+        if normalized_name not in mailbox.get("provided_fields", ALWAYS_PROVIDED_UPDATE_KEYS):
             continue
         current_value = existing_user.get(field_name)
         if desired_value != current_value:
@@ -395,14 +395,18 @@ def provision_mailboxes(graph_client, mailboxes, dry_run=False):
             graph_client.assign_licenses(user["id"], licenses_to_add)
 
         if dry_run:
-            action = "plan-create" if created else "plan-update" if update_fields or licenses_to_add else "plan-noop"
-        else:
             if created:
-                action = "created"
+                action = "plan-create"
             elif update_fields or licenses_to_add:
-                action = "updated"
+                action = "plan-update"
             else:
-                action = "unchanged"
+                action = "plan-noop"
+        elif created:
+            action = "created"
+        elif update_fields or licenses_to_add:
+            action = "updated"
+        else:
+            action = "unchanged"
 
         results.append(
             {
