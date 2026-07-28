@@ -158,6 +158,16 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           environment: ${{ env.AZURE_CLOUD }}
 
+      - name: Verify Azure login session
+        if: ${{ steps.staging_auth.outputs.auth_mode == 'oidc' || steps.staging_auth.outputs.auth_mode == 'service-principal-json' }}
+        run: |
+          set -euo pipefail
+          az cloud set --name "${{ env.AZURE_CLOUD }}"
+          if ! az account show --output none 2>/dev/null; then
+            echo "Azure login did not establish a valid session. Check that credentials are correct and authentication is properly configured."
+            exit 1
+          fi
+
       - name: Resolve staging deployment inputs
         id: staging_inputs
         env:
@@ -203,7 +213,7 @@ jobs:
           fi
 
       - name: Deploy staging image (Azure login)
-        if: ${{ steps.staging_auth.outputs.auth_mode != 'publish-profile' }}
+        if: ${{ steps.staging_auth.outcome == 'success' && steps.staging_auth.outputs.auth_mode != 'publish-profile' && steps.staging_auth.outputs.auth_mode != '' }}
         id: deploy_login
         uses: azure/webapps-deploy@v2
         with:
@@ -211,7 +221,7 @@ jobs:
           images: ${{ needs.build.outputs.image_ref }}
 
       - name: Deploy staging image (publish profile)
-        if: ${{ steps.staging_auth.outputs.auth_mode == 'publish-profile' }}
+        if: ${{ steps.staging_auth.outcome == 'success' && steps.staging_auth.outputs.auth_mode == 'publish-profile' }}
         id: deploy_publish_profile
         uses: azure/webapps-deploy@v2
         with:
@@ -338,6 +348,16 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           environment: ${{ env.AZURE_CLOUD }}
 
+      - name: Verify Azure login session
+        if: ${{ steps.production_auth.outputs.auth_mode == 'oidc' || steps.production_auth.outputs.auth_mode == 'service-principal-json' }}
+        run: |
+          set -euo pipefail
+          az cloud set --name "${{ env.AZURE_CLOUD }}"
+          if ! az account show --output none 2>/dev/null; then
+            echo "Azure login did not establish a valid session. Check that credentials are correct and authentication is properly configured."
+            exit 1
+          fi
+
       - name: Resolve production deployment inputs
         id: production_inputs
         env:
@@ -383,7 +403,7 @@ jobs:
           fi
 
       - name: Deploy production image (Azure login)
-        if: ${{ steps.production_auth.outputs.auth_mode != 'publish-profile' }}
+        if: ${{ steps.production_auth.outcome == 'success' && steps.production_auth.outputs.auth_mode != 'publish-profile' && steps.production_auth.outputs.auth_mode != '' }}
         id: deploy_login
         uses: azure/webapps-deploy@v2
         with:
@@ -391,7 +411,7 @@ jobs:
           images: ${{ needs.build.outputs.image_ref }}
 
       - name: Deploy production image (publish profile)
-        if: ${{ steps.production_auth.outputs.auth_mode == 'publish-profile' }}
+        if: ${{ steps.production_auth.outcome == 'success' && steps.production_auth.outputs.auth_mode == 'publish-profile' }}
         id: deploy_publish_profile
         uses: azure/webapps-deploy@v2
         with:
@@ -459,14 +479,14 @@ jobs:
           fi
 
       - name: Roll back to previous image tag (Azure login)
-        if: steps.smoke.outcome == 'failure' && steps.rollback_tag.outputs.is_valid == 'true' && steps.production_auth.outputs.auth_mode != 'publish-profile'
+        if: steps.smoke.outcome == 'failure' && steps.rollback_tag.outputs.is_valid == 'true' && steps.production_auth.outcome == 'success' && steps.production_auth.outputs.auth_mode != 'publish-profile' && steps.production_auth.outputs.auth_mode != ''
         uses: azure/webapps-deploy@v2
         with:
           app-name: ${{ steps.production_inputs.outputs.app_name }}
           images: ghcr.io/${{ needs.build.outputs.repo_lc }}/${{ env.IMAGE_NAME }}:${{ needs.build.outputs.previous_tag }}
 
       - name: Roll back to previous image tag (publish profile)
-        if: steps.smoke.outcome == 'failure' && steps.rollback_tag.outputs.is_valid == 'true' && steps.production_auth.outputs.auth_mode == 'publish-profile'
+        if: steps.smoke.outcome == 'failure' && steps.rollback_tag.outputs.is_valid == 'true' && steps.production_auth.outcome == 'success' && steps.production_auth.outputs.auth_mode == 'publish-profile'
         uses: azure/webapps-deploy@v2
         with:
           app-name: ${{ steps.production_inputs.outputs.app_name }}
