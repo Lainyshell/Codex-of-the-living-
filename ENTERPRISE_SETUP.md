@@ -75,7 +75,7 @@ All repository secrets and API credentials must be stored in **Azure Key Vault**
   - `SHAREPOINT_CLIENT_ID`
   - `SHAREPOINT_CLIENT_SECRET`
 
-Reference these from GitHub Actions via GitHub **Environment Secrets** (see `AUTOMATION_GUIDE.md`).
+Reference these from GitHub Actions through Azure login plus Key Vault reads. Keep only OIDC metadata (`AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`) and emergency fallback credentials in GitHub Environments.
 
 ### 2.3 PowerApps & Power Automate Integration
 
