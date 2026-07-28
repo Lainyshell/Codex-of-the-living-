@@ -34,7 +34,12 @@ jobs:
       - name: Prepare image metadata
         id: meta
         run: |
-          REPO_LC="${GITHUB_REPOSITORY,,}"
+          OWNER_LC="${GITHUB_REPOSITORY_OWNER,,}"
+          REPO_NAME_LC="${GITHUB_REPOSITORY#*/}"
+          REPO_NAME_LC="${REPO_NAME_LC,,}"
+          REPO_NAME_CLEANED="$(echo "${REPO_NAME_LC}" | sed -E 's/[^a-z0-9._-]+/-/g')"
+          REPO_NAME_SANITIZED="$(echo "${REPO_NAME_CLEANED}" | sed -E 's/^[._-]+//; s/[._-]+$//')"
+          REPO_LC="${OWNER_LC}/${REPO_NAME_SANITIZED}"
           IMAGE_TAG="${GITHUB_SHA}"
           IMAGE_REF="ghcr.io/${REPO_LC}/${{ env.IMAGE_NAME }}:${IMAGE_TAG}"
           # github.event.before can be empty/zero for first commits, manual runs, or force-push edges.
