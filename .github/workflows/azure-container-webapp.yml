@@ -108,8 +108,16 @@ jobs:
           AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS }}
         run: |
           set -euo pipefail
-          AUTH_MODE=""
+          HAS_OIDC_LOGIN=false
+          HAS_AZURE_LOGIN=false
           if [ -n "${CLIENT_ID}" ] && [ -n "${TENANT_ID}" ] && [ -n "${SUBSCRIPTION_ID}" ]; then
+            HAS_OIDC_LOGIN=true
+            HAS_AZURE_LOGIN=true
+          elif [ -n "${AZURE_CREDENTIALS}" ]; then
+            HAS_AZURE_LOGIN=true
+          fi
+          AUTH_MODE=""
+          if [ "${HAS_OIDC_LOGIN}" = "true" ]; then
             AUTH_MODE="oidc"
           elif [ -n "${AZURE_CREDENTIALS}" ]; then
             AUTH_MODE="service-principal-json"
@@ -128,7 +136,7 @@ jobs:
             echo "Azure Key Vault secret names were configured without AZURE_KEY_VAULT_NAME."
             exit 1
           fi
-          if [ -n "${KEY_VAULT_NAME}" ] && [ -z "${AZURE_CREDENTIALS}" ] && ! { [ -n "${CLIENT_ID}" ] && [ -n "${TENANT_ID}" ] && [ -n "${SUBSCRIPTION_ID}" ]; } && { [ -n "${APP_NAME_SECRET_NAME}" ] || [ -n "${PUBLISH_PROFILE_SECRET_NAME}" ]; }; then
+          if [ -n "${KEY_VAULT_NAME}" ] && [ "${HAS_AZURE_LOGIN}" = "false" ] && { [ -n "${APP_NAME_SECRET_NAME}" ] || [ -n "${PUBLISH_PROFILE_SECRET_NAME}" ]; }; then
             echo "Azure Key Vault secret resolution requires OIDC or service principal login."
             exit 1
           fi
@@ -280,8 +288,16 @@ jobs:
           AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS }}
         run: |
           set -euo pipefail
-          AUTH_MODE=""
+          HAS_OIDC_LOGIN=false
+          HAS_AZURE_LOGIN=false
           if [ -n "${CLIENT_ID}" ] && [ -n "${TENANT_ID}" ] && [ -n "${SUBSCRIPTION_ID}" ]; then
+            HAS_OIDC_LOGIN=true
+            HAS_AZURE_LOGIN=true
+          elif [ -n "${AZURE_CREDENTIALS}" ]; then
+            HAS_AZURE_LOGIN=true
+          fi
+          AUTH_MODE=""
+          if [ "${HAS_OIDC_LOGIN}" = "true" ]; then
             AUTH_MODE="oidc"
           elif [ -n "${AZURE_CREDENTIALS}" ]; then
             AUTH_MODE="service-principal-json"
@@ -300,7 +316,7 @@ jobs:
             echo "Azure Key Vault secret names were configured without AZURE_KEY_VAULT_NAME."
             exit 1
           fi
-          if [ -n "${KEY_VAULT_NAME}" ] && [ -z "${AZURE_CREDENTIALS}" ] && ! { [ -n "${CLIENT_ID}" ] && [ -n "${TENANT_ID}" ] && [ -n "${SUBSCRIPTION_ID}" ]; } && { [ -n "${APP_NAME_SECRET_NAME}" ] || [ -n "${PUBLISH_PROFILE_SECRET_NAME}" ]; }; then
+          if [ -n "${KEY_VAULT_NAME}" ] && [ "${HAS_AZURE_LOGIN}" = "false" ] && { [ -n "${APP_NAME_SECRET_NAME}" ] || [ -n "${PUBLISH_PROFILE_SECRET_NAME}" ]; }; then
             echo "Azure Key Vault secret resolution requires OIDC or service principal login."
             exit 1
           fi
