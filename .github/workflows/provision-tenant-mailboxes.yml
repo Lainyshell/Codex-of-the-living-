@@ -1,0 +1,59 @@
+name: Provision Tenant Mailboxes
+
+on:
+  workflow_dispatch:
+    inputs:
+      mailboxes_json:
+        description: JSON array of mailbox requests
+        required: true
+        type: string
+      dry_run:
+        description: Preview only without writing to Microsoft 365
+        required: true
+        default: 'true'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+      default_usage_location:
+        description: Fallback usage location for new users
+        required: true
+        default: US
+        type: string
+
+jobs:
+  provision-mailboxes:
+    runs-on: ubuntu-latest
+    environment: compliance
+    permissions:
+      id-token: write
+      contents: read
+
+    env:
+      AZURE_CLOUD: AzureUSGovernment
+      GRAPH_BASE_URL: https://graph.microsoft.us/v1.0
+      GRAPH_RESOURCE: https://graph.microsoft.us/
+      DEFAULT_USAGE_LOCATION: ${{ inputs.default_usage_location }}
+      DRY_RUN: ${{ inputs.dry_run }}
+      MAILBOXES_JSON: ${{ inputs.mailboxes_json }}
+      AZURE_KEY_VAULT_NAME: ${{ vars.AZURE_KEY_VAULT_NAME }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          environment: AzureUSGovernment
+
+      - name: Provision Mailboxes
+        run: python scripts/provision_mailboxes.py
