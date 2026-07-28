@@ -106,7 +106,11 @@ jobs:
             echo "Missing required app name variable. Set AZURE_WEBAPP_NAME_STAGING (or AZURE_WEBAPP_NAME)."
             exit 1
           fi
-          if [ -z "${PUBLISH_PROFILE}" ] && { [ -z "${AZURE_CREDENTIALS}" ] && { [ -z "${CLIENT_ID}" ] || [ -z "${TENANT_ID}" ] || [ -z "${SUBSCRIPTION_ID}" ]; }; }; then
+          HAS_OIDC_CREDENTIALS=false
+          if [ -n "${CLIENT_ID}" ] && [ -n "${TENANT_ID}" ] && [ -n "${SUBSCRIPTION_ID}" ]; then
+            HAS_OIDC_CREDENTIALS=true
+          fi
+          if [ -z "${PUBLISH_PROFILE}" ] && [ -z "${AZURE_CREDENTIALS}" ] && [ "${HAS_OIDC_CREDENTIALS}" != "true" ]; then
             echo "Missing Azure deploy credentials. Configure AZURE_WEBAPP_PUBLISH_PROFILE_STAGING/AZURE_WEBAPP_PUBLISH_PROFILE, or AZURE_CREDENTIALS, or AZURE_CLIENT_ID + AZURE_TENANT_ID + AZURE_SUBSCRIPTION_ID."
             exit 1
           fi
@@ -136,9 +140,10 @@ jobs:
       - name: Staging smoke test (/ and /rates)
         env:
           BASE_URL: ${{ steps.deploy.outputs.webapp-url }}
+          APP_NAME: ${{ vars.AZURE_WEBAPP_NAME_STAGING || vars.AZURE_WEBAPP_NAME }}
         run: |
           set -euo pipefail
-          URL="${BASE_URL:-https://${{ vars.AZURE_WEBAPP_NAME_STAGING || vars.AZURE_WEBAPP_NAME }}.azurewebsites.net}"
+          URL="${BASE_URL:-https://${APP_NAME}.azurewebsites.net}"
 
           STATUS_BODY=$(curl -fsS "${URL}/")
           python - <<'PY' "$STATUS_BODY"
@@ -195,7 +200,11 @@ jobs:
             echo "Missing required app name variable. Set AZURE_WEBAPP_NAME_PRODUCTION (or AZURE_WEBAPP_NAME)."
             exit 1
           fi
-          if [ -z "${PUBLISH_PROFILE}" ] && { [ -z "${AZURE_CREDENTIALS}" ] && { [ -z "${CLIENT_ID}" ] || [ -z "${TENANT_ID}" ] || [ -z "${SUBSCRIPTION_ID}" ]; }; }; then
+          HAS_OIDC_CREDENTIALS=false
+          if [ -n "${CLIENT_ID}" ] && [ -n "${TENANT_ID}" ] && [ -n "${SUBSCRIPTION_ID}" ]; then
+            HAS_OIDC_CREDENTIALS=true
+          fi
+          if [ -z "${PUBLISH_PROFILE}" ] && [ -z "${AZURE_CREDENTIALS}" ] && [ "${HAS_OIDC_CREDENTIALS}" != "true" ]; then
             echo "Missing Azure deploy credentials. Configure AZURE_WEBAPP_PUBLISH_PROFILE_PRODUCTION/AZURE_WEBAPP_PUBLISH_PROFILE, or AZURE_CREDENTIALS, or AZURE_CLIENT_ID + AZURE_TENANT_ID + AZURE_SUBSCRIPTION_ID."
             exit 1
           fi
@@ -227,9 +236,10 @@ jobs:
         continue-on-error: true
         env:
           BASE_URL: ${{ steps.deploy.outputs.webapp-url }}
+          APP_NAME: ${{ vars.AZURE_WEBAPP_NAME_PRODUCTION || vars.AZURE_WEBAPP_NAME }}
         run: |
           set -euo pipefail
-          URL="${BASE_URL:-https://${{ vars.AZURE_WEBAPP_NAME_PRODUCTION || vars.AZURE_WEBAPP_NAME }}.azurewebsites.net}"
+          URL="${BASE_URL:-https://${APP_NAME}.azurewebsites.net}"
 
           STATUS_BODY=$(curl -fsS "${URL}/")
           python - <<'PY' "$STATUS_BODY"
