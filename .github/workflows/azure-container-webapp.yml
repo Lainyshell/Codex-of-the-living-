@@ -8,6 +8,7 @@ on:
 permissions:
   contents: read
   packages: write
+  id-token: write
 
 concurrency:
   group: treasury-api-release
@@ -91,12 +92,45 @@ jobs:
       name: staging
       url: ${{ steps.deploy.outputs.webapp-url }}
     steps:
+      - name: Validate staging deployment credentials
+        env:
+          APP_NAME: ${{ vars.AZURE_WEBAPP_NAME_STAGING || vars.AZURE_WEBAPP_NAME }}
+          PUBLISH_PROFILE: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE_STAGING || secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+          CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS }}
+        run: |
+          set -euo pipefail
+          if [ -z "${APP_NAME}" ]; then
+            echo "Missing required app name variable. Set AZURE_WEBAPP_NAME_STAGING (or AZURE_WEBAPP_NAME)."
+            exit 1
+          fi
+          if [ -z "${PUBLISH_PROFILE}" ] && { [ -z "${AZURE_CREDENTIALS}" ] && { [ -z "${CLIENT_ID}" ] || [ -z "${TENANT_ID}" ] || [ -z "${SUBSCRIPTION_ID}" ]; }; }; then
+            echo "Missing Azure deploy credentials. Configure AZURE_WEBAPP_PUBLISH_PROFILE_STAGING/AZURE_WEBAPP_PUBLISH_PROFILE, or AZURE_CREDENTIALS, or AZURE_CLIENT_ID + AZURE_TENANT_ID + AZURE_SUBSCRIPTION_ID."
+            exit 1
+          fi
+
+      - name: Azure login (service principal JSON)
+        if: ${{ (secrets.AZURE_WEBAPP_PUBLISH_PROFILE_STAGING == '' && secrets.AZURE_WEBAPP_PUBLISH_PROFILE == '') && secrets.AZURE_CREDENTIALS != '' }}
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Azure login (OIDC)
+        if: ${{ (secrets.AZURE_WEBAPP_PUBLISH_PROFILE_STAGING == '' && secrets.AZURE_WEBAPP_PUBLISH_PROFILE == '') && secrets.AZURE_CREDENTIALS == '' && secrets.AZURE_CLIENT_ID != '' && secrets.AZURE_TENANT_ID != '' && secrets.AZURE_SUBSCRIPTION_ID != '' }}
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
       - name: Deploy staging image
         id: deploy
         uses: azure/webapps-deploy@v2
         with:
-          app-name: ${{ vars.AZURE_WEBAPP_NAME_STAGING }}
-          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE_STAGING }}
+          app-name: ${{ vars.AZURE_WEBAPP_NAME_STAGING || vars.AZURE_WEBAPP_NAME }}
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE_STAGING || secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
           images: ${{ needs.build.outputs.image_ref }}
 
       - name: Staging smoke test (/ and /rates)
@@ -104,7 +138,7 @@ jobs:
           BASE_URL: ${{ steps.deploy.outputs.webapp-url }}
         run: |
           set -euo pipefail
-          URL="${BASE_URL:-https://${{ vars.AZURE_WEBAPP_NAME_STAGING }}.azurewebsites.net}"
+          URL="${BASE_URL:-https://${{ vars.AZURE_WEBAPP_NAME_STAGING || vars.AZURE_WEBAPP_NAME }}.azurewebsites.net}"
 
           STATUS_BODY=$(curl -fsS "${URL}/")
           python - <<'PY' "$STATUS_BODY"
@@ -147,12 +181,45 @@ jobs:
       name: production
       url: ${{ steps.deploy.outputs.webapp-url }}
     steps:
+      - name: Validate production deployment credentials
+        env:
+          APP_NAME: ${{ vars.AZURE_WEBAPP_NAME_PRODUCTION || vars.AZURE_WEBAPP_NAME }}
+          PUBLISH_PROFILE: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE_PRODUCTION || secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+          CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS }}
+        run: |
+          set -euo pipefail
+          if [ -z "${APP_NAME}" ]; then
+            echo "Missing required app name variable. Set AZURE_WEBAPP_NAME_PRODUCTION (or AZURE_WEBAPP_NAME)."
+            exit 1
+          fi
+          if [ -z "${PUBLISH_PROFILE}" ] && { [ -z "${AZURE_CREDENTIALS}" ] && { [ -z "${CLIENT_ID}" ] || [ -z "${TENANT_ID}" ] || [ -z "${SUBSCRIPTION_ID}" ]; }; }; then
+            echo "Missing Azure deploy credentials. Configure AZURE_WEBAPP_PUBLISH_PROFILE_PRODUCTION/AZURE_WEBAPP_PUBLISH_PROFILE, or AZURE_CREDENTIALS, or AZURE_CLIENT_ID + AZURE_TENANT_ID + AZURE_SUBSCRIPTION_ID."
+            exit 1
+          fi
+
+      - name: Azure login (service principal JSON)
+        if: ${{ (secrets.AZURE_WEBAPP_PUBLISH_PROFILE_PRODUCTION == '' && secrets.AZURE_WEBAPP_PUBLISH_PROFILE == '') && secrets.AZURE_CREDENTIALS != '' }}
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Azure login (OIDC)
+        if: ${{ (secrets.AZURE_WEBAPP_PUBLISH_PROFILE_PRODUCTION == '' && secrets.AZURE_WEBAPP_PUBLISH_PROFILE == '') && secrets.AZURE_CREDENTIALS == '' && secrets.AZURE_CLIENT_ID != '' && secrets.AZURE_TENANT_ID != '' && secrets.AZURE_SUBSCRIPTION_ID != '' }}
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
       - name: Deploy production image
         id: deploy
         uses: azure/webapps-deploy@v2
         with:
-          app-name: ${{ vars.AZURE_WEBAPP_NAME_PRODUCTION }}
-          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE_PRODUCTION }}
+          app-name: ${{ vars.AZURE_WEBAPP_NAME_PRODUCTION || vars.AZURE_WEBAPP_NAME }}
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE_PRODUCTION || secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
           images: ${{ needs.build.outputs.image_ref }}
 
       - name: Production smoke test (/ and /rates)
@@ -162,7 +229,7 @@ jobs:
           BASE_URL: ${{ steps.deploy.outputs.webapp-url }}
         run: |
           set -euo pipefail
-          URL="${BASE_URL:-https://${{ vars.AZURE_WEBAPP_NAME_PRODUCTION }}.azurewebsites.net}"
+          URL="${BASE_URL:-https://${{ vars.AZURE_WEBAPP_NAME_PRODUCTION || vars.AZURE_WEBAPP_NAME }}.azurewebsites.net}"
 
           STATUS_BODY=$(curl -fsS "${URL}/")
           python - <<'PY' "$STATUS_BODY"
@@ -211,8 +278,8 @@ jobs:
         if: steps.smoke.outcome == 'failure' && steps.rollback_tag.outputs.is_valid == 'true'
         uses: azure/webapps-deploy@v2
         with:
-          app-name: ${{ vars.AZURE_WEBAPP_NAME_PRODUCTION }}
-          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE_PRODUCTION }}
+          app-name: ${{ vars.AZURE_WEBAPP_NAME_PRODUCTION || vars.AZURE_WEBAPP_NAME }}
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE_PRODUCTION || secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
           images: ghcr.io/${{ needs.build.outputs.repo_lc }}/${{ env.IMAGE_NAME }}:${{ needs.build.outputs.previous_tag }}
 
       - name: Fail workflow when production smoke test fails
