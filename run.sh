@@ -22,6 +22,12 @@ if ! command -v python3 &> /dev/null; then
     exit 1
 fi
 
+# Enforce minimum Python version (3.11+)
+if ! python3 -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)'; then
+    echo "Error: Python 3.11 or later is required."
+    exit 1
+fi
+
 echo "Python version:"
 python3 --version
 echo ""
