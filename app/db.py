@@ -40,6 +40,51 @@ from datetime import datetime, timezone
 _DB_PATH = os.environ.get("PAYMENTS_DB_PATH", "/tmp/payments.db")
 
 _DDL = """
+CREATE TABLE IF NOT EXISTS insurance_claims (
+    claim_id        TEXT PRIMARY KEY,
+    envelope_id     TEXT NOT NULL,
+    policy_number   TEXT,
+    carrier_name    TEXT,
+    claim_type      TEXT NOT NULL,
+    claim_status    TEXT NOT NULL,
+    loss_amount     TEXT,
+    deductible      TEXT,
+    payout_amount   TEXT,
+    incident_date   TEXT,
+    jurisdiction    TEXT,
+    source_payload  TEXT NOT NULL,
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS cod_transactions (
+    cod_id            TEXT PRIMARY KEY,
+    envelope_id       TEXT NOT NULL,
+    usps_reference    TEXT,
+    recipient_name    TEXT,
+    recipient_address TEXT,
+    cod_amount        TEXT NOT NULL,
+    currency          TEXT NOT NULL DEFAULT 'USD',
+    status            TEXT NOT NULL,
+    payment_channel   TEXT,
+    posted_at         TEXT,
+    created_at        TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS policies (
+    policy_number   TEXT PRIMARY KEY,
+    carrier_name    TEXT NOT NULL,
+    coverage_type   TEXT NOT NULL,
+    limit_amount    TEXT,
+    deductible      TEXT,
+    effective_date  TEXT,
+    expiration_date TEXT,
+    insured_entity  TEXT,
+    notes           TEXT,
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS transactions (
     id                   TEXT PRIMARY KEY,
     idempotency_key      TEXT UNIQUE NOT NULL,
@@ -95,18 +140,46 @@ CREATE TABLE IF NOT EXISTS shipping_import_rows (
 );
 
 CREATE TABLE IF NOT EXISTS docusign_usps_proof_events (
+    id                  TEXT PRIMARY KEY,
+    envelope_id         TEXT NOT NULL,
+    event_type          TEXT NOT NULL,
+    envelope_status     TEXT,
+    event_timestamp     TEXT NOT NULL,
+    transaction_id      TEXT,
+    usps_reference      TEXT NOT NULL,
+    recipient_name      TEXT,
+    recipient_email     TEXT,
+    recipient_address   TEXT,
+    recipient_city      TEXT,
+    recipient_state     TEXT,
+    recipient_zip       TEXT,
+    recipient_phone     TEXT,
+    jurisdiction        TEXT NOT NULL DEFAULT 'VBTNT',
+    source_payload      TEXT NOT NULL,
+    created_at          TEXT NOT NULL,
+    UNIQUE(envelope_id, event_type, event_timestamp)
+);
+
+CREATE TABLE IF NOT EXISTS tribal_returns (
     id               TEXT PRIMARY KEY,
     envelope_id      TEXT NOT NULL,
-    event_type       TEXT NOT NULL,
-    envelope_status  TEXT,
-    event_timestamp  TEXT NOT NULL,
     transaction_id   TEXT,
-    usps_reference   TEXT NOT NULL,
-    recipient_name   TEXT,
-    recipient_email  TEXT,
-    source_payload   TEXT NOT NULL,
-    created_at       TEXT NOT NULL,
-    UNIQUE(envelope_id, event_type, event_timestamp)
+    envelope_status  TEXT NOT NULL,
+    return_type      TEXT NOT NULL,
+    amount           TEXT NOT NULL,
+    stripe_payment_id TEXT,
+    posted_at        TEXT,
+    created_at       TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS contract_breaches (
+    id              TEXT PRIMARY KEY,
+    transaction_id  TEXT NOT NULL,
+    breach_type     TEXT NOT NULL,
+    penalty_amount  TEXT,
+    details         TEXT NOT NULL,
+    jurisdiction    TEXT NOT NULL DEFAULT 'VBTNT',
+    created_at      TEXT NOT NULL
 );
 """
 
@@ -154,6 +227,31 @@ def init_db() -> None:
             WHERE id IS NULL OR id = ''
             """
         )
+        # Migrate: add address columns to docusign_usps_proof_events if absent
+        proof_columns = {
+            row["name"]
+            for row in con.execute(
+                "PRAGMA table_info(docusign_usps_proof_events)"
+            ).fetchall()
+        }
+        for col in ("recipient_address", "recipient_city", "recipient_state",
+                    "recipient_zip", "recipient_phone"):
+            if col not in proof_columns:
+                con.execute(
+                    f"ALTER TABLE docusign_usps_proof_events ADD COLUMN {col} TEXT"
+                )
+        if "jurisdiction" not in proof_columns:
+            con.execute(
+                "ALTER TABLE docusign_usps_proof_events "
+                "ADD COLUMN jurisdiction TEXT NOT NULL DEFAULT 'VBTNT'"
+            )
+        # Migrate: add updated_at to insurance_claims if absent
+        ic_columns = {
+            row["name"]
+            for row in con.execute("PRAGMA table_info(insurance_claims)").fetchall()
+        }
+        if "updated_at" not in ic_columns and ic_columns:
+            con.execute("ALTER TABLE insurance_claims ADD COLUMN updated_at TEXT")
 
 
 def create_transaction(
@@ -212,6 +310,16 @@ def get_transaction_by_id(txn_id: str) -> dict | None:
             "SELECT * FROM transactions WHERE id = ?", (txn_id,)
         ).fetchone()
     return dict(row) if row else None
+
+
+def get_transactions_by_status(status: str) -> list[dict]:
+    """Return all transactions whose status matches *status*."""
+    with _conn() as con:
+        rows = con.execute(
+            "SELECT * FROM transactions WHERE status = ? ORDER BY created_at",
+            (status,),
+        ).fetchall()
+    return [dict(r) for r in rows]
 
 
 def get_transaction_by_docusign_envelope_id(envelope_id: str) -> dict | None:
@@ -401,6 +509,11 @@ def create_docusign_usps_proof_event(
     transaction_id: str | None,
     recipient_name: str | None,
     recipient_email: str | None,
+    recipient_address: str | None = None,
+    recipient_city: str | None = None,
+    recipient_state: str | None = None,
+    recipient_zip: str | None = None,
+    recipient_phone: str | None = None,
     source_payload: dict,
 ) -> dict:
     if not event_timestamp:
@@ -426,8 +539,9 @@ def create_docusign_usps_proof_event(
             INSERT OR IGNORE INTO docusign_usps_proof_events
                 (id, envelope_id, event_type, envelope_status, event_timestamp,
                  transaction_id, usps_reference, recipient_name, recipient_email,
-                 source_payload, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 recipient_address, recipient_city, recipient_state, recipient_zip,
+                 recipient_phone, jurisdiction, source_payload, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'VBTNT', ?, ?)
             """,
             (
                 str(uuid.uuid4()),
@@ -439,6 +553,11 @@ def create_docusign_usps_proof_event(
                 usps_reference,
                 recipient_name,
                 recipient_email,
+                recipient_address,
+                recipient_city,
+                recipient_state,
+                recipient_zip,
+                recipient_phone,
                 json.dumps(source_payload),
                 created_at,
             ),
@@ -462,7 +581,8 @@ def list_docusign_usps_proof_events(envelope_id: str) -> list[dict]:
             """
             SELECT id, envelope_id, event_type, envelope_status, event_timestamp,
                    transaction_id, usps_reference, recipient_name, recipient_email,
-                   created_at
+                   recipient_address, recipient_city, recipient_state, recipient_zip,
+                   recipient_phone, jurisdiction, created_at
             FROM docusign_usps_proof_events
             WHERE envelope_id = ?
             ORDER BY event_timestamp, created_at
@@ -470,3 +590,384 @@ def list_docusign_usps_proof_events(envelope_id: str) -> list[dict]:
             (envelope_id,),
         ).fetchall()
     return [dict(row) for row in rows]
+
+
+# ---------------------------------------------------------------------------
+# Tribal returns
+# ---------------------------------------------------------------------------
+
+def create_tribal_return(
+    *,
+    envelope_id: str,
+    transaction_id: str | None,
+    envelope_status: str,
+    return_type: str,
+    amount: str,
+    stripe_payment_id: str | None = None,
+) -> dict:
+    """
+    Record a tribal economic return for an envelope event.
+    Returns the created record as a dict.
+    """
+    record_id = str(uuid.uuid4())
+    now = _now()
+    posted_at = now if stripe_payment_id else None
+    with _conn() as con:
+        con.execute(
+            """
+            INSERT INTO tribal_returns
+                (id, envelope_id, transaction_id, envelope_status,
+                 return_type, amount, stripe_payment_id, posted_at, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                record_id,
+                envelope_id,
+                transaction_id,
+                envelope_status,
+                return_type,
+                amount,
+                stripe_payment_id,
+                posted_at,
+                now,
+            ),
+        )
+    return get_tribal_return(record_id)
+
+
+def get_tribal_return(record_id: str) -> dict | None:
+    with _conn() as con:
+        row = con.execute(
+            "SELECT * FROM tribal_returns WHERE id = ?", (record_id,)
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def update_tribal_return_stripe(record_id: str, stripe_payment_id: str) -> None:
+    now = _now()
+    with _conn() as con:
+        con.execute(
+            "UPDATE tribal_returns SET stripe_payment_id=?, posted_at=? WHERE id=?",
+            (stripe_payment_id, now, record_id),
+        )
+
+
+def list_tribal_returns(envelope_id: str) -> list[dict]:
+    with _conn() as con:
+        rows = con.execute(
+            """
+            SELECT * FROM tribal_returns
+            WHERE envelope_id = ?
+            ORDER BY created_at
+            """,
+            (envelope_id,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+# ---------------------------------------------------------------------------
+# Insurance claims
+# ---------------------------------------------------------------------------
+
+_VALID_CLAIM_STATUSES = frozenset({
+    "open", "under_review", "approved", "denied", "paid", "closed",
+})
+
+
+def create_insurance_claim(
+    *,
+    envelope_id: str,
+    claim_type: str,
+    claim_status: str = "open",
+    policy_number: str | None = None,
+    carrier_name: str | None = None,
+    loss_amount: str | None = None,
+    deductible: str | None = None,
+    payout_amount: str | None = None,
+    incident_date: str | None = None,
+    jurisdiction: str | None = None,
+    source_payload: dict,
+) -> dict:
+    if claim_status not in _VALID_CLAIM_STATUSES:
+        raise ValueError(f"Invalid claim_status {claim_status!r}")
+    claim_id = str(uuid.uuid4())
+    now = _now()
+    with _conn() as con:
+        con.execute(
+            """
+            INSERT INTO insurance_claims
+                (claim_id, envelope_id, policy_number, carrier_name,
+                 claim_type, claim_status, loss_amount, deductible,
+                 payout_amount, incident_date, jurisdiction,
+                 source_payload, created_at, updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                claim_id, envelope_id, policy_number, carrier_name,
+                claim_type, claim_status, loss_amount, deductible,
+                payout_amount, incident_date, jurisdiction,
+                json.dumps(source_payload), now, now,
+            ),
+        )
+    return get_insurance_claim(claim_id)
+
+
+def get_insurance_claim(claim_id: str) -> dict | None:
+    with _conn() as con:
+        row = con.execute(
+            "SELECT * FROM insurance_claims WHERE claim_id = ?", (claim_id,)
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def list_insurance_claims(envelope_id: str | None = None) -> list[dict]:
+    with _conn() as con:
+        if envelope_id:
+            rows = con.execute(
+                "SELECT * FROM insurance_claims WHERE envelope_id = ? ORDER BY created_at",
+                (envelope_id,),
+            ).fetchall()
+        else:
+            rows = con.execute(
+                "SELECT * FROM insurance_claims ORDER BY created_at DESC LIMIT 200"
+            ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def update_insurance_claim_status(
+    claim_id: str,
+    claim_status: str,
+    *,
+    payout_amount: str | None = None,
+) -> None:
+    if claim_status not in _VALID_CLAIM_STATUSES:
+        raise ValueError(f"Invalid claim_status {claim_status!r}")
+    now = _now()
+    with _conn() as con:
+        if payout_amount is not None:
+            con.execute(
+                "UPDATE insurance_claims SET claim_status=?, payout_amount=?, updated_at=? WHERE claim_id=?",
+                (claim_status, payout_amount, now, claim_id),
+            )
+        else:
+            con.execute(
+                "UPDATE insurance_claims SET claim_status=?, updated_at=? WHERE claim_id=?",
+                (claim_status, now, claim_id),
+            )
+
+
+# ---------------------------------------------------------------------------
+# COD transactions
+# ---------------------------------------------------------------------------
+
+_VALID_COD_STATUSES = frozenset({"pending", "paid", "returned"})
+
+
+def create_cod_transaction(
+    *,
+    envelope_id: str,
+    cod_amount: str,
+    usps_reference: str | None = None,
+    recipient_name: str | None = None,
+    recipient_address: str | None = None,
+    currency: str = "USD",
+    status: str = "pending",
+    payment_channel: str | None = None,
+) -> dict:
+    if status not in _VALID_COD_STATUSES:
+        raise ValueError(f"Invalid COD status {status!r}")
+    cod_id = str(uuid.uuid4())
+    now = _now()
+    with _conn() as con:
+        con.execute(
+            """
+            INSERT INTO cod_transactions
+                (cod_id, envelope_id, usps_reference, recipient_name,
+                 recipient_address, cod_amount, currency, status,
+                 payment_channel, posted_at, created_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                cod_id, envelope_id, usps_reference, recipient_name,
+                recipient_address, cod_amount, currency, status,
+                payment_channel, None, now,
+            ),
+        )
+    return get_cod_transaction(cod_id)
+
+
+def get_cod_transaction(cod_id: str) -> dict | None:
+    with _conn() as con:
+        row = con.execute(
+            "SELECT * FROM cod_transactions WHERE cod_id = ?", (cod_id,)
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def list_cod_transactions(envelope_id: str | None = None) -> list[dict]:
+    with _conn() as con:
+        if envelope_id:
+            rows = con.execute(
+                "SELECT * FROM cod_transactions WHERE envelope_id = ? ORDER BY created_at",
+                (envelope_id,),
+            ).fetchall()
+        else:
+            rows = con.execute(
+                "SELECT * FROM cod_transactions ORDER BY created_at DESC LIMIT 200"
+            ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def update_cod_transaction(
+    cod_id: str,
+    *,
+    status: str | None = None,
+    payment_channel: str | None = None,
+    posted_at: str | None = None,
+) -> None:
+    if status is not None and status not in _VALID_COD_STATUSES:
+        raise ValueError(f"Invalid COD status {status!r}")
+    now = _now()
+    with _conn() as con:
+        if status is not None:
+            con.execute(
+                "UPDATE cod_transactions SET status=? WHERE cod_id=?",
+                (status, cod_id),
+            )
+        if payment_channel is not None:
+            con.execute(
+                "UPDATE cod_transactions SET payment_channel=? WHERE cod_id=?",
+                (payment_channel, cod_id),
+            )
+        if posted_at is not None:
+            con.execute(
+                "UPDATE cod_transactions SET posted_at=? WHERE cod_id=?",
+                (posted_at, cod_id),
+            )
+
+
+# ---------------------------------------------------------------------------
+# Policies
+# ---------------------------------------------------------------------------
+
+def create_policy(
+    *,
+    policy_number: str,
+    carrier_name: str,
+    coverage_type: str,
+    limit_amount: str | None = None,
+    deductible: str | None = None,
+    effective_date: str | None = None,
+    expiration_date: str | None = None,
+    insured_entity: str | None = None,
+    notes: str | None = None,
+) -> dict:
+    now = _now()
+    with _conn() as con:
+        try:
+            con.execute(
+                """
+                INSERT INTO policies
+                    (policy_number, carrier_name, coverage_type, limit_amount,
+                     deductible, effective_date, expiration_date,
+                     insured_entity, notes, created_at, updated_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    policy_number, carrier_name, coverage_type, limit_amount,
+                    deductible, effective_date, expiration_date,
+                    insured_entity, notes, now, now,
+                ),
+            )
+        except sqlite3.IntegrityError:
+            raise ValueError(f"Policy {policy_number!r} already exists")
+    return get_policy(policy_number)
+
+
+def get_policy(policy_number: str) -> dict | None:
+    with _conn() as con:
+        row = con.execute(
+            "SELECT * FROM policies WHERE policy_number = ?", (policy_number,)
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def list_policies() -> list[dict]:
+    with _conn() as con:
+        rows = con.execute(
+            "SELECT * FROM policies ORDER BY created_at DESC LIMIT 200"
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+# ---------------------------------------------------------------------------
+# Contract breaches
+# ---------------------------------------------------------------------------
+
+
+def log_contract_breach(
+    *,
+    transaction_id: str,
+    breach_type: str,
+    penalty_amount: str | None,
+    details: dict,
+) -> dict:
+    """
+    Persist a contract breach record.  Returns the created row as a dict.
+    """
+    record_id = str(uuid.uuid4())
+    now = _now()
+    with _conn() as con:
+        con.execute(
+            """
+            INSERT INTO contract_breaches
+                (id, transaction_id, breach_type, penalty_amount,
+                 details, jurisdiction, created_at)
+            VALUES (?, ?, ?, ?, ?, 'VBTNT', ?)
+            """,
+            (
+                record_id,
+                transaction_id,
+                breach_type,
+                penalty_amount,
+                json.dumps(details),
+                now,
+            ),
+        )
+    return get_contract_breach(record_id)
+
+
+def get_contract_breach(breach_id: str) -> dict | None:
+    with _conn() as con:
+        row = con.execute(
+            "SELECT * FROM contract_breaches WHERE id = ?", (breach_id,)
+        ).fetchone()
+    if not row:
+        return None
+    result = dict(row)
+    try:
+        result["details"] = json.loads(result["details"])
+    except (ValueError, TypeError):
+        pass
+    return result
+
+
+def list_contract_breaches(transaction_id: str) -> list[dict]:
+    with _conn() as con:
+        rows = con.execute(
+            """
+            SELECT * FROM contract_breaches
+            WHERE transaction_id = ?
+            ORDER BY created_at
+            """,
+            (transaction_id,),
+        ).fetchall()
+    results = []
+    for row in rows:
+        record = dict(row)
+        try:
+            record["details"] = json.loads(record["details"])
+        except (ValueError, TypeError):
+            pass
+        results.append(record)
+    return results

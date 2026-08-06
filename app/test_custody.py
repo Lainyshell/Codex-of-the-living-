@@ -77,6 +77,7 @@ class TestCustodyEndpoints(unittest.TestCase):
         os.environ.pop("PAYMENTS_DB_PATH", None)
         os.environ.pop("DOCUSIGN_HMAC_KEY", None)
         custody.set_repo_root_for_testing(None)
+        importlib.reload(db)
 
     def _write_custody_support_files(self):
         repo_root = Path(self._repo_dir.name)
