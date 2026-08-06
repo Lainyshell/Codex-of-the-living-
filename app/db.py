@@ -95,18 +95,35 @@ CREATE TABLE IF NOT EXISTS shipping_import_rows (
 );
 
 CREATE TABLE IF NOT EXISTS docusign_usps_proof_events (
+    id                  TEXT PRIMARY KEY,
+    envelope_id         TEXT NOT NULL,
+    event_type          TEXT NOT NULL,
+    envelope_status     TEXT,
+    event_timestamp     TEXT NOT NULL,
+    transaction_id      TEXT,
+    usps_reference      TEXT NOT NULL,
+    recipient_name      TEXT,
+    recipient_email     TEXT,
+    recipient_address   TEXT,
+    recipient_city      TEXT,
+    recipient_state     TEXT,
+    recipient_zip       TEXT,
+    recipient_phone     TEXT,
+    source_payload      TEXT NOT NULL,
+    created_at          TEXT NOT NULL,
+    UNIQUE(envelope_id, event_type, event_timestamp)
+);
+
+CREATE TABLE IF NOT EXISTS tribal_returns (
     id               TEXT PRIMARY KEY,
     envelope_id      TEXT NOT NULL,
-    event_type       TEXT NOT NULL,
-    envelope_status  TEXT,
-    event_timestamp  TEXT NOT NULL,
     transaction_id   TEXT,
-    usps_reference   TEXT NOT NULL,
-    recipient_name   TEXT,
-    recipient_email  TEXT,
-    source_payload   TEXT NOT NULL,
-    created_at       TEXT NOT NULL,
-    UNIQUE(envelope_id, event_type, event_timestamp)
+    envelope_status  TEXT NOT NULL,
+    return_type      TEXT NOT NULL,
+    amount           TEXT NOT NULL,
+    stripe_payment_id TEXT,
+    posted_at        TEXT,
+    created_at       TEXT NOT NULL
 );
 """
 
@@ -154,6 +171,19 @@ def init_db() -> None:
             WHERE id IS NULL OR id = ''
             """
         )
+        # Migrate: add address columns to docusign_usps_proof_events if absent
+        proof_columns = {
+            row["name"]
+            for row in con.execute(
+                "PRAGMA table_info(docusign_usps_proof_events)"
+            ).fetchall()
+        }
+        for col in ("recipient_address", "recipient_city", "recipient_state",
+                    "recipient_zip", "recipient_phone"):
+            if col not in proof_columns:
+                con.execute(
+                    f"ALTER TABLE docusign_usps_proof_events ADD COLUMN {col} TEXT"
+                )
 
 
 def create_transaction(
@@ -401,6 +431,11 @@ def create_docusign_usps_proof_event(
     transaction_id: str | None,
     recipient_name: str | None,
     recipient_email: str | None,
+    recipient_address: str | None = None,
+    recipient_city: str | None = None,
+    recipient_state: str | None = None,
+    recipient_zip: str | None = None,
+    recipient_phone: str | None = None,
     source_payload: dict,
 ) -> dict:
     if not event_timestamp:
@@ -426,8 +461,9 @@ def create_docusign_usps_proof_event(
             INSERT OR IGNORE INTO docusign_usps_proof_events
                 (id, envelope_id, event_type, envelope_status, event_timestamp,
                  transaction_id, usps_reference, recipient_name, recipient_email,
-                 source_payload, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 recipient_address, recipient_city, recipient_state, recipient_zip,
+                 recipient_phone, source_payload, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 str(uuid.uuid4()),
@@ -439,6 +475,11 @@ def create_docusign_usps_proof_event(
                 usps_reference,
                 recipient_name,
                 recipient_email,
+                recipient_address,
+                recipient_city,
+                recipient_state,
+                recipient_zip,
+                recipient_phone,
                 json.dumps(source_payload),
                 created_at,
             ),
@@ -462,10 +503,84 @@ def list_docusign_usps_proof_events(envelope_id: str) -> list[dict]:
             """
             SELECT id, envelope_id, event_type, envelope_status, event_timestamp,
                    transaction_id, usps_reference, recipient_name, recipient_email,
-                   created_at
+                   recipient_address, recipient_city, recipient_state, recipient_zip,
+                   recipient_phone, created_at
             FROM docusign_usps_proof_events
             WHERE envelope_id = ?
             ORDER BY event_timestamp, created_at
+            """,
+            (envelope_id,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+# ---------------------------------------------------------------------------
+# Tribal returns
+# ---------------------------------------------------------------------------
+
+def create_tribal_return(
+    *,
+    envelope_id: str,
+    transaction_id: str | None,
+    envelope_status: str,
+    return_type: str,
+    amount: str,
+    stripe_payment_id: str | None = None,
+) -> dict:
+    """
+    Record a tribal economic return for an envelope event.
+    Returns the created record as a dict.
+    """
+    record_id = str(uuid.uuid4())
+    now = _now()
+    posted_at = now if stripe_payment_id else None
+    with _conn() as con:
+        con.execute(
+            """
+            INSERT INTO tribal_returns
+                (id, envelope_id, transaction_id, envelope_status,
+                 return_type, amount, stripe_payment_id, posted_at, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                record_id,
+                envelope_id,
+                transaction_id,
+                envelope_status,
+                return_type,
+                amount,
+                stripe_payment_id,
+                posted_at,
+                now,
+            ),
+        )
+    return get_tribal_return(record_id)
+
+
+def get_tribal_return(record_id: str) -> dict | None:
+    with _conn() as con:
+        row = con.execute(
+            "SELECT * FROM tribal_returns WHERE id = ?", (record_id,)
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def update_tribal_return_stripe(record_id: str, stripe_payment_id: str) -> None:
+    now = _now()
+    with _conn() as con:
+        con.execute(
+            "UPDATE tribal_returns SET stripe_payment_id=?, posted_at=? WHERE id=?",
+            (stripe_payment_id, now, record_id),
+        )
+
+
+def list_tribal_returns(envelope_id: str) -> list[dict]:
+    with _conn() as con:
+        rows = con.execute(
+            """
+            SELECT * FROM tribal_returns
+            WHERE envelope_id = ?
+            ORDER BY created_at
             """,
             (envelope_id,),
         ).fetchall()

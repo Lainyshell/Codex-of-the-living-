@@ -21,7 +21,9 @@ import custody
 import db
 import payments
 import remic
+import royalty_engine
 import safeguards
+import sovereign_vocabulary
 
 app = Flask(__name__)
 # CORS — FCC FRN 0037987799
@@ -30,6 +32,8 @@ CORS(app)
 # Verify governance references are intact at startup.
 # Any tampering with config.py governance constants will cause startup failure.
 safeguards.assert_governance_references_intact()
+# Verify the Sovereign Vocabulary Dictionary is intact.
+sovereign_vocabulary.assert_vocabulary_intact()
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_SHIPPING_SOURCE = REPO_ROOT / "Verified_Transactions_Template.xlsx"
 XML_NAMESPACES = {
@@ -246,7 +250,7 @@ def _extract_envelope_event_timestamp(body):
 
 def _extract_envelope_recipient(body):
     if not isinstance(body, dict):
-        return None, None
+        return None, None, None, None, None, None, None
 
     data = body.get("data", {})
     recipient_name = (
@@ -259,7 +263,50 @@ def _extract_envelope_recipient(body):
         or data.get("recipientEmail")
         or body.get("recipient", {}).get("email", "")
     )
-    return recipient_name or None, recipient_email or None
+
+    # Address metadata: DocuSign may nest under data.envelopeSummary.recipients.signers[0]
+    # or under body.recipient directly.
+    signer: dict = {}
+    summary = data.get("envelopeSummary", {}) or {}
+    signers = summary.get("recipients", {}).get("signers", [])
+    if signers and isinstance(signers, list):
+        signer = signers[0] if isinstance(signers[0], dict) else {}
+    if not signer:
+        signer = body.get("recipient", {}) or {}
+
+    tabs = signer.get("tabs", {}) or {}
+    address_tabs = tabs.get("addressTabs", []) or []
+    tab_map: dict[str, str] = {}
+    for tab in address_tabs:
+        if isinstance(tab, dict):
+            label = (tab.get("tabLabel") or "").lower()
+            val = tab.get("value") or ""
+            if val:
+                tab_map[label] = val
+
+    recipient_address = (
+        signer.get("deliveryMethod")  # placeholder — overridden below
+        and None
+    ) or tab_map.get("address") or signer.get("address") or None
+    recipient_city = tab_map.get("city") or signer.get("city") or None
+    recipient_state = tab_map.get("state") or signer.get("state") or None
+    recipient_zip = (
+        tab_map.get("zip") or tab_map.get("postalcode")
+        or signer.get("zip") or signer.get("postalCode") or None
+    )
+    recipient_phone = (
+        tab_map.get("phone") or signer.get("phone") or signer.get("phoneNumber") or None
+    )
+
+    return (
+        recipient_name or None,
+        recipient_email or None,
+        recipient_address,
+        recipient_city,
+        recipient_state,
+        recipient_zip,
+        recipient_phone,
+    )
 
 # Initialise the database on startup
 db.init_db()
@@ -672,7 +719,15 @@ def docusign_webhook():
         return jsonify({"error": "envelopeId not found in payload"}), 400
 
     event_timestamp = _extract_envelope_event_timestamp(body)
-    recipient_name, recipient_email = _extract_envelope_recipient(body)
+    (
+        recipient_name,
+        recipient_email,
+        recipient_address,
+        recipient_city,
+        recipient_state,
+        recipient_zip,
+        recipient_phone,
+    ) = _extract_envelope_recipient(body)
 
     # Find the corresponding transaction (if any)
     txn = db.get_transaction_by_docusign_envelope_id(envelope_id)
@@ -685,6 +740,11 @@ def docusign_webhook():
         transaction_id=txn["id"] if txn else None,
         recipient_name=recipient_name,
         recipient_email=recipient_email,
+        recipient_address=recipient_address,
+        recipient_city=recipient_city,
+        recipient_state=recipient_state,
+        recipient_zip=recipient_zip,
+        recipient_phone=recipient_phone,
         source_payload=body,
     )
     custody_envelope = custody.append_docusign_event(
@@ -695,6 +755,14 @@ def docusign_webhook():
         payload=body,
     )
 
+    # ── Economic-return layer: post tribal returns for every envelope event ──
+    tribal_return_ids = _post_tribal_returns(
+        envelope_id=envelope_id,
+        envelope_status=envelope_status or event_type or "unknown",
+        txn=txn,
+        body=body,
+    )
+
     if event_type != "envelope-completed":
         response_payload = {
             "status": "accepted",
@@ -702,6 +770,7 @@ def docusign_webhook():
             "envelope_id": envelope_id,
             "usps_reference": proof_event["usps_reference"],
             "proof_event_id": proof_event["id"],
+            "tribal_returns": tribal_return_ids,
         }
         if custody_envelope:
             response_payload["custody_status"] = custody_envelope["custody_status"]
@@ -714,6 +783,7 @@ def docusign_webhook():
             "envelope_id": envelope_id,
             "usps_reference": proof_event["usps_reference"],
             "proof_event_id": proof_event["id"],
+            "tribal_returns": tribal_return_ids,
             "message": "Envelope recorded for USPS proof without local transaction.",
         }
         if custody_envelope:
@@ -729,6 +799,7 @@ def docusign_webhook():
             "transaction_id": txn_id,
             "usps_reference": proof_event["usps_reference"],
             "proof_event_id": proof_event["id"],
+            "tribal_returns": tribal_return_ids,
         }
         if custody_envelope:
             response_payload["custody_status"] = custody_envelope["custody_status"]
@@ -747,10 +818,96 @@ def docusign_webhook():
         "envelope_id": envelope_id,
         "usps_reference": proof_event["usps_reference"],
         "proof_event_id": proof_event["id"],
+        "tribal_returns": tribal_return_ids,
     }
     if custody_envelope:
         response_payload["custody_status"] = custody_envelope["custody_status"]
     return jsonify(response_payload), 200
+
+
+def _post_tribal_returns(
+    *,
+    envelope_id: str,
+    envelope_status: str,
+    txn: dict | None,
+    body: dict,
+) -> list[str]:
+    """
+    Calculate and persist tribal economic returns for an envelope event.
+    Attempts to post each return to Stripe; logs failures without blocking
+    the webhook response.  Returns a list of created tribal_return record IDs.
+    """
+    principal = None
+    gross_revenue = None
+    if txn:
+        try:
+            principal = txn.get("principal")
+            total = txn.get("total")
+            if total:
+                gross_revenue = total
+        except Exception:
+            pass
+
+    try:
+        return_items = royalty_engine.calculate_tribal_returns(
+            envelope_status=envelope_status,
+            principal=principal,
+            gross_revenue=gross_revenue,
+        )
+    except Exception as exc:
+        app.logger.error("Royalty engine error for envelope %s: %s", envelope_id, exc)
+        return []
+
+    record_ids: list[str] = []
+    stripe_key_available = bool(os.environ.get("STRIPE_API_KEY", ""))
+
+    for item in return_items:
+        stripe_payment_id = None
+        if stripe_key_available:
+            try:
+                cents = royalty_engine.amount_to_cents(item["amount"])
+                if cents >= royalty_engine._STRIPE_MINIMUM_CENTS:
+                    import stripe  # type: ignore[import-untyped]
+                    stripe.api_key = os.environ["STRIPE_API_KEY"]
+                    intent = stripe.PaymentIntent.create(
+                        amount=cents,
+                        currency="usd",
+                        metadata={
+                            "return_type": item["return_type"],
+                            "envelope_id": envelope_id,
+                            "transaction_id": txn["id"] if txn else "",
+                            "envelope_status": envelope_status,
+                            "source": "vbtnt_tribal_return",
+                        },
+                        idempotency_key=(
+                            f"tribal-return-{envelope_id}-"
+                            f"{item['return_type']}-{envelope_status}"
+                        ),
+                    )
+                    stripe_payment_id = intent["id"]
+            except Exception as exc:
+                app.logger.warning(
+                    "Stripe post failed for tribal return %s envelope %s: %s",
+                    item["return_type"], envelope_id, exc,
+                )
+
+        try:
+            record = db.create_tribal_return(
+                envelope_id=envelope_id,
+                transaction_id=txn["id"] if txn else None,
+                envelope_status=envelope_status,
+                return_type=item["return_type"],
+                amount=item["amount"],
+                stripe_payment_id=stripe_payment_id,
+            )
+            record_ids.append(record["id"])
+        except Exception as exc:
+            app.logger.error(
+                "Failed to persist tribal return %s for envelope %s: %s",
+                item["return_type"], envelope_id, exc,
+            )
+
+    return record_ids
 
 
 @app.route("/api/usps-proof/<envelope_id>")
@@ -759,6 +916,54 @@ def get_usps_proof(envelope_id):
     if not events:
         return jsonify({"status": "error", "message": "No USPS proof events found."}), 404
     return jsonify({"status": "ok", "envelope_id": envelope_id, "events": events}), 200
+
+
+@app.route("/api/tribal-returns/<envelope_id>")
+def get_tribal_returns(envelope_id):
+    records = db.list_tribal_returns(envelope_id)
+    if not records:
+        return jsonify({"status": "error", "message": "No tribal return records found."}), 404
+    return jsonify({"status": "ok", "envelope_id": envelope_id, "tribal_returns": records}), 200
+
+
+@app.route("/api/sovereign-vocabulary")
+def get_sovereign_vocabulary():
+    """
+    Return the full VBTNT Sovereign Vocabulary Dictionary.
+    This is the runtime-authoritative source of truth for all VBTNT terminology.
+    """
+    domain_filter = request.args.get("domain")
+    if domain_filter:
+        terms = {
+            k: v for k, v in sovereign_vocabulary.DICTIONARY.items()
+            if v.get("domain") == domain_filter
+        }
+        if not terms:
+            return jsonify({
+                "status": "error",
+                "message": f"No terms found for domain {domain_filter!r}.",
+            }), 404
+        return jsonify({
+            "status": "ok",
+            "domain": domain_filter,
+            "term_count": len(terms),
+            "terms": terms,
+        }), 200
+
+    return jsonify({
+        "status": "ok",
+        "edition": "First Edition",
+        "issued": "2026-07-28",
+        "issuing_authority": "Verdigris Botanica Tribal Nation Trust",
+        "uei": "GUMMCRJPMBN5",
+        "cage": "14JT5",
+        "fedstrip": "18317P",
+        "domains": sovereign_vocabulary.list_domains(),
+        "term_count": len(sovereign_vocabulary.DICTIONARY),
+        "terms": sovereign_vocabulary.DICTIONARY,
+    }), 200
+
+
 
 
 if __name__ == "__main__":
