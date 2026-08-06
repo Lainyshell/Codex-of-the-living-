@@ -21,6 +21,7 @@ plus a Tribal Resolution.
 """
 
 import logging
+import os
 import smtplib
 import threading
 import time
@@ -100,7 +101,6 @@ def _send_steward_alerts(subject: str, body: str) -> None:
         logger.error("SAFEGUARD: No steward alert emails configured — alert dropped: %s", subject)
         return
 
-    import os
     smtp_host = os.environ.get("ALERT_SMTP_HOST", "")
     smtp_port = int(os.environ.get("ALERT_SMTP_PORT", "587"))
     smtp_user = os.environ.get("ALERT_SMTP_USER", "")

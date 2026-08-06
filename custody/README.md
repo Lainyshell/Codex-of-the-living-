@@ -12,11 +12,11 @@ This directory stores append-only custody envelopes for protected VBTN logistics
 
 Every custody record inherits these governing references:
 
-- `/home/runner/work/Codex-of-the-living-/Codex-of-the-living-/TRIBAL_GOVERNANCE.md`
-- `/home/runner/work/Codex-of-the-living-/Codex-of-the-living-/JURISDICTION.md`
-- `/home/runner/work/Codex-of-the-living-/Codex-of-the-living-/docs/GOVERNANCE_CHARTER.md`
-- `/home/runner/work/Codex-of-the-living-/Codex-of-the-living-/docs/CRITICAL_CHANGE_PROTOCOL.md`
-- `/home/runner/work/Codex-of-the-living-/Codex-of-the-living-/legal/DATA_SOVEREIGNTY_AGREEMENT.md`
+- `TRIBAL_GOVERNANCE.md`
+- `JURISDICTION.md`
+- `docs/GOVERNANCE_CHARTER.md`
+- `docs/CRITICAL_CHANGE_PROTOCOL.md`
+- `legal/DATA_SOVEREIGNTY_AGREEMENT.md`
 
 ## Protection requirements
 

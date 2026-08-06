@@ -50,9 +50,10 @@ Every push and pull request triggers the automated **Compliance Check** workflow
 The repository includes a protected custody domain for **VBTN SOVEREIGN SYSTEM — USPS Smart Locker Chain of Custody** records.
 
 - **Custody envelopes** live in `/home/runner/work/Codex-of-the-living-/Codex-of-the-living-/custody/envelopes/`
-- **Primary locker config** lives in `/home/runner/work/Codex-of-the-living-/Codex-of-the-living-/custody/lockers/primary.json`
-- **Custody schema** lives in `/home/runner/work/Codex-of-the-living-/Codex-of-the-living-/custody/schema/envelope.schema.json`
-- **Governance notes** live in `/home/runner/work/Codex-of-the-living-/Codex-of-the-living-/custody/README.md`
+- **Custody envelopes** live in `custody/envelopes/`
+- **Primary locker config** lives in `custody/lockers/primary.json`
+- **Custody schema** lives in `custody/schema/envelope.schema.json`
+- **Governance notes** live in `custody/README.md`
 
 Custody events are append-only, locker validation is driven only by the primary locker map, and high-risk items require multi-steward approval before `RETRIEVED` or `CLOSED`.
 
