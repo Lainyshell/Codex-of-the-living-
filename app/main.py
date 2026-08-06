@@ -760,6 +760,25 @@ def docusign_webhook():
         body=body,
     )
 
+    # ── Insurance claim auto-trigger ──
+    claim_id = _maybe_create_insurance_claim(
+        envelope_id=envelope_id,
+        event_type=event_type or "",
+        envelope_status=envelope_status,
+        txn=txn,
+        body=body,
+    )
+
+    # ── COD transaction auto-trigger ──
+    cod_id = _maybe_create_cod_transaction(
+        envelope_id=envelope_id,
+        proof_event=proof_event,
+        txn=txn,
+        body=body,
+        recipient_name=recipient_name,
+        recipient_address=recipient_address,
+    )
+
     if event_type != "envelope-completed":
         response_payload = {
             "status": "accepted",
@@ -769,6 +788,10 @@ def docusign_webhook():
             "proof_event_id": proof_event["id"],
             "tribal_returns": tribal_return_ids,
         }
+        if claim_id:
+            response_payload["insurance_claim_id"] = claim_id
+        if cod_id:
+            response_payload["cod_transaction_id"] = cod_id
         if custody_envelope:
             response_payload["custody_status"] = custody_envelope["custody_status"]
         return jsonify(response_payload), 200
@@ -783,6 +806,10 @@ def docusign_webhook():
             "tribal_returns": tribal_return_ids,
             "message": "Envelope recorded for USPS proof without local transaction.",
         }
+        if claim_id:
+            response_payload["insurance_claim_id"] = claim_id
+        if cod_id:
+            response_payload["cod_transaction_id"] = cod_id
         if custody_envelope:
             response_payload["custody_status"] = custody_envelope["custody_status"]
         return jsonify(response_payload), 200
@@ -798,6 +825,10 @@ def docusign_webhook():
             "proof_event_id": proof_event["id"],
             "tribal_returns": tribal_return_ids,
         }
+        if claim_id:
+            response_payload["insurance_claim_id"] = claim_id
+        if cod_id:
+            response_payload["cod_transaction_id"] = cod_id
         if custody_envelope:
             response_payload["custody_status"] = custody_envelope["custody_status"]
         return jsonify(response_payload), 200
@@ -817,6 +848,10 @@ def docusign_webhook():
         "proof_event_id": proof_event["id"],
         "tribal_returns": tribal_return_ids,
     }
+    if claim_id:
+        response_payload["insurance_claim_id"] = claim_id
+    if cod_id:
+        response_payload["cod_transaction_id"] = cod_id
     if custody_envelope:
         response_payload["custody_status"] = custody_envelope["custody_status"]
     return jsonify(response_payload), 200
@@ -921,6 +956,311 @@ def get_tribal_returns(envelope_id):
     if not records:
         return jsonify({"status": "error", "message": "No tribal return records found."}), 404
     return jsonify({"status": "ok", "envelope_id": envelope_id, "tribal_returns": records}), 200
+
+
+# ---------------------------------------------------------------------------
+# Insurance claims
+# ---------------------------------------------------------------------------
+
+# Envelope event types / statuses that auto-trigger a claim
+_CLAIM_TRIGGER_TYPES = frozenset({
+    "loss_report", "damage_notice", "contract_dispute", "insurance_claim",
+})
+_CLAIM_TRIGGER_STATUSES = frozenset({
+    "loss_report", "damage_notice", "contract_dispute",
+})
+
+# DocuSign template tag/label → claim type mapping
+_TEMPLATE_CLAIM_TYPE_MAP: dict[str, str] = {
+    "loss_report": "loss",
+    "damage_notice": "damage",
+    "contract_dispute": "liability",
+    "insurance_claim": "general",
+}
+
+
+def _extract_claim_type(event_type: str, envelope_status: str | None, body: dict) -> str | None:
+    """Return a claim_type string if this event should trigger a claim, else None."""
+    for trigger in _CLAIM_TRIGGER_TYPES:
+        if trigger in (event_type or "").lower():
+            return _TEMPLATE_CLAIM_TYPE_MAP.get(trigger, "general")
+    if envelope_status:
+        for trigger in _CLAIM_TRIGGER_STATUSES:
+            if trigger in envelope_status.lower():
+                return _TEMPLATE_CLAIM_TYPE_MAP.get(trigger, "general")
+    # Check DocuSign template tags in the payload
+    data = body.get("data", {}) or {}
+    template_id = (
+        data.get("envelopeSummary", {}).get("templateId")
+        or body.get("templateId")
+        or ""
+    )
+    custom_fields = (
+        data.get("envelopeSummary", {}).get("customFields", {})
+        or body.get("customFields", {})
+        or {}
+    )
+    text_fields = custom_fields.get("textCustomFields", []) or []
+    for field in text_fields:
+        if isinstance(field, dict):
+            label = (field.get("name") or field.get("tabLabel") or "").lower()
+            value = (field.get("value") or "").lower()
+            if label in ("claim_type", "claimtype") and value:
+                return value
+            for trigger in _CLAIM_TRIGGER_TYPES:
+                if trigger in label or trigger in value:
+                    return _TEMPLATE_CLAIM_TYPE_MAP.get(trigger, "general")
+    return None
+
+
+def _maybe_create_insurance_claim(
+    *,
+    envelope_id: str,
+    event_type: str,
+    envelope_status: str | None,
+    txn: dict | None,
+    body: dict,
+) -> str | None:
+    """Auto-create an insurance_claims row if the event warrants it. Returns claim_id or None."""
+    claim_type = _extract_claim_type(event_type, envelope_status, body)
+    if not claim_type:
+        return None
+    try:
+        record = db.create_insurance_claim(
+            envelope_id=envelope_id,
+            claim_type=claim_type,
+            claim_status="open",
+            source_payload=body,
+        )
+        return record["claim_id"]
+    except Exception as exc:
+        app.logger.error("Failed to auto-create insurance claim for envelope %s: %s", envelope_id, exc)
+        return None
+
+
+def _maybe_create_cod_transaction(
+    *,
+    envelope_id: str,
+    proof_event: dict,
+    txn: dict | None,
+    body: dict,
+    recipient_name: str | None,
+    recipient_address: str | None,
+) -> str | None:
+    """Auto-create a cod_transactions row if the envelope is COD-tagged. Returns cod_id or None."""
+    # Detect COD flag in DocuSign tabs or USPS metadata
+    is_cod = False
+    cod_amount = None
+
+    data = body.get("data", {}) or {}
+    summary = data.get("envelopeSummary", {}) or {}
+    signers = summary.get("recipients", {}).get("signers", []) or []
+    signer = signers[0] if signers and isinstance(signers[0], dict) else {}
+    tabs = signer.get("tabs", {}) or {}
+
+    for tab_list_key in ("textTabs", "checkboxTabs", "radioGroupTabs"):
+        for tab in (tabs.get(tab_list_key) or []):
+            if not isinstance(tab, dict):
+                continue
+            label = (tab.get("tabLabel") or tab.get("name") or "").lower()
+            value = (tab.get("value") or tab.get("selected") or "").lower()
+            if "cod" in label or "collect_on_delivery" in label:
+                is_cod = True
+            if label in ("cod_amount", "codamount") and value:
+                cod_amount = value
+
+    # Also check top-level body keys
+    if not is_cod:
+        for key in ("cod", "collect_on_delivery", "isCOD", "is_cod"):
+            if body.get(key):
+                is_cod = True
+                break
+
+    if not is_cod:
+        return None
+
+    # Derive amount from transaction total or body
+    if cod_amount is None:
+        cod_amount = (
+            (txn.get("total") if txn else None)
+            or str(body.get("cod_amount", "0"))
+        )
+
+    try:
+        record = db.create_cod_transaction(
+            envelope_id=envelope_id,
+            cod_amount=cod_amount,
+            usps_reference=proof_event.get("usps_reference"),
+            recipient_name=recipient_name,
+            recipient_address=recipient_address,
+        )
+        return record["cod_id"]
+    except Exception as exc:
+        app.logger.error("Failed to auto-create COD transaction for envelope %s: %s", envelope_id, exc)
+        return None
+
+
+@app.route("/api/insurance-claims", methods=["POST"])
+def create_insurance_claim():
+    body = request.get_json(silent=True)
+    if not body:
+        return jsonify({"status": "error", "message": "Request body must be valid JSON"}), 400
+
+    envelope_id = body.get("envelope_id", "").strip()
+    claim_type = body.get("claim_type", "").strip()
+    if not envelope_id or not claim_type:
+        return jsonify({"status": "error", "message": "envelope_id and claim_type are required"}), 400
+
+    try:
+        record = db.create_insurance_claim(
+            envelope_id=envelope_id,
+            claim_type=claim_type,
+            claim_status=body.get("claim_status", "open"),
+            policy_number=body.get("policy_number"),
+            carrier_name=body.get("carrier_name"),
+            loss_amount=str(body["loss_amount"]) if body.get("loss_amount") is not None else None,
+            deductible=str(body["deductible"]) if body.get("deductible") is not None else None,
+            payout_amount=str(body["payout_amount"]) if body.get("payout_amount") is not None else None,
+            incident_date=body.get("incident_date"),
+            jurisdiction=body.get("jurisdiction"),
+            source_payload=body.get("source_payload") or body,
+        )
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
+
+    return jsonify({"status": "created", "claim": record}), 201
+
+
+@app.route("/api/insurance-claims/<claim_id>", methods=["GET"])
+def get_insurance_claim(claim_id):
+    record = db.get_insurance_claim(claim_id)
+    if record is None:
+        return jsonify({"status": "error", "message": "Insurance claim not found."}), 404
+    return jsonify({"status": "ok", "claim": record}), 200
+
+
+@app.route("/api/insurance-claims", methods=["GET"])
+def list_insurance_claims():
+    envelope_id = request.args.get("envelope_id")
+    records = db.list_insurance_claims(envelope_id=envelope_id)
+    return jsonify({"status": "ok", "claims": records, "count": len(records)}), 200
+
+
+@app.route("/api/insurance-claims/<claim_id>/status", methods=["PATCH"])
+def update_insurance_claim_status(claim_id):
+    body = request.get_json(silent=True)
+    if not body:
+        return jsonify({"status": "error", "message": "Request body must be valid JSON"}), 400
+    claim_status = body.get("claim_status", "").strip()
+    if not claim_status:
+        return jsonify({"status": "error", "message": "claim_status is required"}), 400
+    try:
+        db.update_insurance_claim_status(
+            claim_id,
+            claim_status,
+            payout_amount=str(body["payout_amount"]) if body.get("payout_amount") is not None else None,
+        )
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
+    record = db.get_insurance_claim(claim_id)
+    if record is None:
+        return jsonify({"status": "error", "message": "Insurance claim not found."}), 404
+    return jsonify({"status": "updated", "claim": record}), 200
+
+
+# ---------------------------------------------------------------------------
+# COD transactions
+# ---------------------------------------------------------------------------
+
+@app.route("/api/cod-transactions", methods=["POST"])
+def create_cod_transaction():
+    body = request.get_json(silent=True)
+    if not body:
+        return jsonify({"status": "error", "message": "Request body must be valid JSON"}), 400
+
+    envelope_id = body.get("envelope_id", "").strip()
+    cod_amount = body.get("cod_amount")
+    if not envelope_id or cod_amount is None:
+        return jsonify({"status": "error", "message": "envelope_id and cod_amount are required"}), 400
+
+    try:
+        record = db.create_cod_transaction(
+            envelope_id=envelope_id,
+            cod_amount=str(cod_amount),
+            usps_reference=body.get("usps_reference"),
+            recipient_name=body.get("recipient_name"),
+            recipient_address=body.get("recipient_address"),
+            currency=body.get("currency", "USD"),
+            status=body.get("status", "pending"),
+            payment_channel=body.get("payment_channel"),
+        )
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
+
+    return jsonify({"status": "created", "cod_transaction": record}), 201
+
+
+@app.route("/api/cod-transactions/<cod_id>", methods=["GET"])
+def get_cod_transaction(cod_id):
+    record = db.get_cod_transaction(cod_id)
+    if record is None:
+        return jsonify({"status": "error", "message": "COD transaction not found."}), 404
+    return jsonify({"status": "ok", "cod_transaction": record}), 200
+
+
+@app.route("/api/cod-transactions", methods=["GET"])
+def list_cod_transactions():
+    envelope_id = request.args.get("envelope_id")
+    records = db.list_cod_transactions(envelope_id=envelope_id)
+    return jsonify({"status": "ok", "cod_transactions": records, "count": len(records)}), 200
+
+
+# ---------------------------------------------------------------------------
+# Policies
+# ---------------------------------------------------------------------------
+
+@app.route("/api/policies", methods=["POST"])
+def create_policy():
+    body = request.get_json(silent=True)
+    if not body:
+        return jsonify({"status": "error", "message": "Request body must be valid JSON"}), 400
+
+    policy_number = body.get("policy_number", "").strip()
+    carrier_name = body.get("carrier_name", "").strip()
+    coverage_type = body.get("coverage_type", "").strip()
+    if not policy_number or not carrier_name or not coverage_type:
+        return jsonify({"status": "error", "message": "policy_number, carrier_name, and coverage_type are required"}), 400
+
+    try:
+        record = db.create_policy(
+            policy_number=policy_number,
+            carrier_name=carrier_name,
+            coverage_type=coverage_type,
+            limit_amount=str(body["limit"]) if body.get("limit") is not None else None,
+            deductible=str(body["deductible"]) if body.get("deductible") is not None else None,
+            effective_date=body.get("effective_date"),
+            expiration_date=body.get("expiration_date"),
+            insured_entity=body.get("insured_entity"),
+            notes=body.get("notes"),
+        )
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 409
+
+    return jsonify({"status": "created", "policy": record}), 201
+
+
+@app.route("/api/policies/<policy_number>", methods=["GET"])
+def get_policy(policy_number):
+    record = db.get_policy(policy_number)
+    if record is None:
+        return jsonify({"status": "error", "message": "Policy not found."}), 404
+    return jsonify({"status": "ok", "policy": record}), 200
+
+
+@app.route("/api/policies", methods=["GET"])
+def list_policies():
+    records = db.list_policies()
+    return jsonify({"status": "ok", "policies": records, "count": len(records)}), 200
 
 
 @app.route("/api/sovereign-vocabulary")

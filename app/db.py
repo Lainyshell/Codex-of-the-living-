@@ -40,6 +40,51 @@ from datetime import datetime, timezone
 _DB_PATH = os.environ.get("PAYMENTS_DB_PATH", "/tmp/payments.db")
 
 _DDL = """
+CREATE TABLE IF NOT EXISTS insurance_claims (
+    claim_id        TEXT PRIMARY KEY,
+    envelope_id     TEXT NOT NULL,
+    policy_number   TEXT,
+    carrier_name    TEXT,
+    claim_type      TEXT NOT NULL,
+    claim_status    TEXT NOT NULL,
+    loss_amount     TEXT,
+    deductible      TEXT,
+    payout_amount   TEXT,
+    incident_date   TEXT,
+    jurisdiction    TEXT,
+    source_payload  TEXT NOT NULL,
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS cod_transactions (
+    cod_id            TEXT PRIMARY KEY,
+    envelope_id       TEXT NOT NULL,
+    usps_reference    TEXT,
+    recipient_name    TEXT,
+    recipient_address TEXT,
+    cod_amount        TEXT NOT NULL,
+    currency          TEXT NOT NULL DEFAULT 'USD',
+    status            TEXT NOT NULL,
+    payment_channel   TEXT,
+    posted_at         TEXT,
+    created_at        TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS policies (
+    policy_number   TEXT PRIMARY KEY,
+    carrier_name    TEXT NOT NULL,
+    coverage_type   TEXT NOT NULL,
+    limit_amount    TEXT,
+    deductible      TEXT,
+    effective_date  TEXT,
+    expiration_date TEXT,
+    insured_entity  TEXT,
+    notes           TEXT,
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS transactions (
     id                   TEXT PRIMARY KEY,
     idempotency_key      TEXT UNIQUE NOT NULL,
@@ -184,6 +229,13 @@ def init_db() -> None:
                 con.execute(
                     f"ALTER TABLE docusign_usps_proof_events ADD COLUMN {col} TEXT"
                 )
+        # Migrate: add updated_at to insurance_claims if absent
+        ic_columns = {
+            row["name"]
+            for row in con.execute("PRAGMA table_info(insurance_claims)").fetchall()
+        }
+        if "updated_at" not in ic_columns and ic_columns:
+            con.execute("ALTER TABLE insurance_claims ADD COLUMN updated_at TEXT")
 
 
 def create_transaction(
@@ -583,5 +635,240 @@ def list_tribal_returns(envelope_id: str) -> list[dict]:
             ORDER BY created_at
             """,
             (envelope_id,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+# ---------------------------------------------------------------------------
+# Insurance claims
+# ---------------------------------------------------------------------------
+
+_VALID_CLAIM_STATUSES = frozenset({
+    "open", "under_review", "approved", "denied", "paid", "closed",
+})
+
+
+def create_insurance_claim(
+    *,
+    envelope_id: str,
+    claim_type: str,
+    claim_status: str = "open",
+    policy_number: str | None = None,
+    carrier_name: str | None = None,
+    loss_amount: str | None = None,
+    deductible: str | None = None,
+    payout_amount: str | None = None,
+    incident_date: str | None = None,
+    jurisdiction: str | None = None,
+    source_payload: dict,
+) -> dict:
+    if claim_status not in _VALID_CLAIM_STATUSES:
+        raise ValueError(f"Invalid claim_status {claim_status!r}")
+    claim_id = str(uuid.uuid4())
+    now = _now()
+    with _conn() as con:
+        con.execute(
+            """
+            INSERT INTO insurance_claims
+                (claim_id, envelope_id, policy_number, carrier_name,
+                 claim_type, claim_status, loss_amount, deductible,
+                 payout_amount, incident_date, jurisdiction,
+                 source_payload, created_at, updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                claim_id, envelope_id, policy_number, carrier_name,
+                claim_type, claim_status, loss_amount, deductible,
+                payout_amount, incident_date, jurisdiction,
+                json.dumps(source_payload), now, now,
+            ),
+        )
+    return get_insurance_claim(claim_id)
+
+
+def get_insurance_claim(claim_id: str) -> dict | None:
+    with _conn() as con:
+        row = con.execute(
+            "SELECT * FROM insurance_claims WHERE claim_id = ?", (claim_id,)
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def list_insurance_claims(envelope_id: str | None = None) -> list[dict]:
+    with _conn() as con:
+        if envelope_id:
+            rows = con.execute(
+                "SELECT * FROM insurance_claims WHERE envelope_id = ? ORDER BY created_at",
+                (envelope_id,),
+            ).fetchall()
+        else:
+            rows = con.execute(
+                "SELECT * FROM insurance_claims ORDER BY created_at DESC LIMIT 200"
+            ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def update_insurance_claim_status(
+    claim_id: str,
+    claim_status: str,
+    *,
+    payout_amount: str | None = None,
+) -> None:
+    if claim_status not in _VALID_CLAIM_STATUSES:
+        raise ValueError(f"Invalid claim_status {claim_status!r}")
+    now = _now()
+    with _conn() as con:
+        if payout_amount is not None:
+            con.execute(
+                "UPDATE insurance_claims SET claim_status=?, payout_amount=?, updated_at=? WHERE claim_id=?",
+                (claim_status, payout_amount, now, claim_id),
+            )
+        else:
+            con.execute(
+                "UPDATE insurance_claims SET claim_status=?, updated_at=? WHERE claim_id=?",
+                (claim_status, now, claim_id),
+            )
+
+
+# ---------------------------------------------------------------------------
+# COD transactions
+# ---------------------------------------------------------------------------
+
+_VALID_COD_STATUSES = frozenset({"pending", "paid", "returned"})
+
+
+def create_cod_transaction(
+    *,
+    envelope_id: str,
+    cod_amount: str,
+    usps_reference: str | None = None,
+    recipient_name: str | None = None,
+    recipient_address: str | None = None,
+    currency: str = "USD",
+    status: str = "pending",
+    payment_channel: str | None = None,
+) -> dict:
+    if status not in _VALID_COD_STATUSES:
+        raise ValueError(f"Invalid COD status {status!r}")
+    cod_id = str(uuid.uuid4())
+    now = _now()
+    with _conn() as con:
+        con.execute(
+            """
+            INSERT INTO cod_transactions
+                (cod_id, envelope_id, usps_reference, recipient_name,
+                 recipient_address, cod_amount, currency, status,
+                 payment_channel, posted_at, created_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                cod_id, envelope_id, usps_reference, recipient_name,
+                recipient_address, cod_amount, currency, status,
+                payment_channel, None, now,
+            ),
+        )
+    return get_cod_transaction(cod_id)
+
+
+def get_cod_transaction(cod_id: str) -> dict | None:
+    with _conn() as con:
+        row = con.execute(
+            "SELECT * FROM cod_transactions WHERE cod_id = ?", (cod_id,)
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def list_cod_transactions(envelope_id: str | None = None) -> list[dict]:
+    with _conn() as con:
+        if envelope_id:
+            rows = con.execute(
+                "SELECT * FROM cod_transactions WHERE envelope_id = ? ORDER BY created_at",
+                (envelope_id,),
+            ).fetchall()
+        else:
+            rows = con.execute(
+                "SELECT * FROM cod_transactions ORDER BY created_at DESC LIMIT 200"
+            ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def update_cod_transaction(
+    cod_id: str,
+    *,
+    status: str | None = None,
+    payment_channel: str | None = None,
+    posted_at: str | None = None,
+) -> None:
+    if status is not None and status not in _VALID_COD_STATUSES:
+        raise ValueError(f"Invalid COD status {status!r}")
+    now = _now()
+    with _conn() as con:
+        if status is not None:
+            con.execute(
+                "UPDATE cod_transactions SET status=? WHERE cod_id=?",
+                (status, cod_id),
+            )
+        if payment_channel is not None:
+            con.execute(
+                "UPDATE cod_transactions SET payment_channel=? WHERE cod_id=?",
+                (payment_channel, cod_id),
+            )
+        if posted_at is not None:
+            con.execute(
+                "UPDATE cod_transactions SET posted_at=? WHERE cod_id=?",
+                (posted_at, cod_id),
+            )
+
+
+# ---------------------------------------------------------------------------
+# Policies
+# ---------------------------------------------------------------------------
+
+def create_policy(
+    *,
+    policy_number: str,
+    carrier_name: str,
+    coverage_type: str,
+    limit_amount: str | None = None,
+    deductible: str | None = None,
+    effective_date: str | None = None,
+    expiration_date: str | None = None,
+    insured_entity: str | None = None,
+    notes: str | None = None,
+) -> dict:
+    now = _now()
+    with _conn() as con:
+        try:
+            con.execute(
+                """
+                INSERT INTO policies
+                    (policy_number, carrier_name, coverage_type, limit_amount,
+                     deductible, effective_date, expiration_date,
+                     insured_entity, notes, created_at, updated_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    policy_number, carrier_name, coverage_type, limit_amount,
+                    deductible, effective_date, expiration_date,
+                    insured_entity, notes, now, now,
+                ),
+            )
+        except sqlite3.IntegrityError:
+            raise ValueError(f"Policy {policy_number!r} already exists")
+    return get_policy(policy_number)
+
+
+def get_policy(policy_number: str) -> dict | None:
+    with _conn() as con:
+        row = con.execute(
+            "SELECT * FROM policies WHERE policy_number = ?", (policy_number,)
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def list_policies() -> list[dict]:
+    with _conn() as con:
+        rows = con.execute(
+            "SELECT * FROM policies ORDER BY created_at DESC LIMIT 200"
         ).fetchall()
     return [dict(row) for row in rows]
