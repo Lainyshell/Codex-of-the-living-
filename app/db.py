@@ -33,6 +33,7 @@ import json
 import os
 import sqlite3
 import uuid
+import hashlib
 from contextlib import contextmanager
 from datetime import datetime, timezone
 
@@ -140,6 +141,19 @@ def _conn():
 def init_db() -> None:
     with _conn() as con:
         con.executescript(_DDL)
+        shipping_row_columns = {
+            row["name"]
+            for row in con.execute("PRAGMA table_info(shipping_import_rows)").fetchall()
+        }
+        if "id" not in shipping_row_columns:
+            con.execute("ALTER TABLE shipping_import_rows ADD COLUMN id TEXT")
+        con.execute(
+            """
+            UPDATE shipping_import_rows
+            SET id = lower(hex(randomblob(16)))
+            WHERE id IS NULL OR id = ''
+            """
+        )
 
 
 def create_transaction(
@@ -374,17 +388,26 @@ def create_docusign_usps_proof_event(
     envelope_id: str,
     event_type: str,
     envelope_status: str | None,
-    event_timestamp: str,
+    event_timestamp: str | None,
     transaction_id: str | None,
     recipient_name: str | None,
     recipient_email: str | None,
     source_payload: dict,
 ) -> dict:
-    usps_reference = (
-        f"USPS-PROOF-{envelope_id[:12]}-{event_timestamp[:19]}"
+    if not event_timestamp:
+        payload_fingerprint = hashlib.sha256(
+            json.dumps(source_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()[:24]
+        event_timestamp = f"hash-{payload_fingerprint}"
+
+    normalized_timestamp = (
+        event_timestamp[:19]
         .replace(":", "")
         .replace("-", "")
         .replace("T", "")
+    )
+    usps_reference = (
+        f"USPS-PROOF-{envelope_id}-{normalized_timestamp}"
     )
     created_at = _now()
 
@@ -419,7 +442,9 @@ def create_docusign_usps_proof_event(
             (envelope_id, event_type, event_timestamp),
         ).fetchone()
 
-    return dict(row) if row else {}
+    if not row:
+        raise RuntimeError("Unable to persist USPS proof event")
+    return dict(row)
 
 
 def list_docusign_usps_proof_events(envelope_id: str) -> list[dict]:

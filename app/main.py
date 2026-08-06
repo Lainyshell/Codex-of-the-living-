@@ -234,12 +234,14 @@ def _extract_envelope_event_timestamp(body):
         or body.get("generatedDateTime")
         or body.get("data", {}).get("eventDateTime")
         or body.get("data", {}).get("generatedDateTime")
-        or datetime.now(timezone.utc).isoformat(timespec="milliseconds")
     )
 
 
 def _extract_envelope_recipient(body):
-    data = body.get("data", {}) if isinstance(body, dict) else {}
+    if not isinstance(body, dict):
+        return None, None
+
+    data = body.get("data", {})
     recipient_name = (
         body.get("recipientName")
         or data.get("recipientName")
