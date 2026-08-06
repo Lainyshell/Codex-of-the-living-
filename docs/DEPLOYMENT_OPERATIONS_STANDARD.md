@@ -29,6 +29,8 @@ The production release pipeline is:
 5. **Run production smoke checks** (`/` and `/rates`)
 6. **Rollback to previous image tag if production smoke checks fail**
 
+Before running this pipeline for a live cutover, run `.github/workflows/go-live-readiness.yml` (`Go-Live Readiness`) manually. It validates staging/production deployment wiring and observability baseline configuration and fails fast with explicit missing-setting errors.
+
 ### Required GitHub Environment Configuration
 
 Configure these environments in repository settings:
@@ -134,11 +136,12 @@ Structured telemetry records include:
 Execute this drill before declaring production ready:
 
 1. Merge a PR into `main`.
-2. Run a staging activation deployment and verify the OIDC identity has federated credentials for the GitHub repository/environment pair, can read the deployment Key Vault, and the full release workflow succeeds in order: build → staging → production.
-3. Confirm smoke checks pass for `/` and `/rates`.
-4. Confirm Operations Observability summary reflects healthy state.
-5. Validate alert path by inducing a non-destructive synthetic failure in staging or via threshold override.
-6. Validate rollback path by forcing a failed production smoke check and confirming previous image redeploy.
-7. Archive run links and artifacts for audit traceability.
+2. Run `Go-Live Readiness` and resolve all reported missing variables/secrets before deployment.
+3. Run a staging activation deployment and verify the OIDC identity has federated credentials for the GitHub repository/environment pair, can read the deployment Key Vault, and the full release workflow succeeds in order: build → staging → production.
+4. Confirm smoke checks pass for `/` and `/rates`.
+5. Confirm Operations Observability summary reflects healthy state.
+6. Validate alert path by inducing a non-destructive synthetic failure in staging or via threshold override.
+7. Validate rollback path by forcing a failed production smoke check and confirming previous image redeploy.
+8. Archive run links and artifacts for audit traceability.
 
 If all checks pass, this document is the frozen deployment standard for future releases.

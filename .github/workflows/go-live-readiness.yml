@@ -1,0 +1,168 @@
+name: Go-Live Readiness
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DEFAULT_WEBAPP_HOSTNAME_SUFFIX: azurewebsites.us
+
+jobs:
+  check-staging:
+    name: Check Staging Deployment Inputs
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - name: Validate staging wiring
+        env:
+          TARGET_ENV: staging
+          APP_NAME: ${{ vars.AZURE_WEBAPP_NAME_STAGING || vars.AZURE_WEBAPP_NAME }}
+          APP_NAME_SECRET_NAME: ${{ vars.AZURE_WEBAPP_NAME_STAGING_SECRET_NAME || vars.AZURE_WEBAPP_NAME_SECRET_NAME }}
+          KEY_VAULT_NAME: ${{ vars.AZURE_KEY_VAULT_NAME }}
+          PUBLISH_PROFILE: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE_STAGING || secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+          PUBLISH_PROFILE_SECRET_NAME: ${{ vars.AZURE_WEBAPP_PUBLISH_PROFILE_STAGING_SECRET_NAME || vars.AZURE_WEBAPP_PUBLISH_PROFILE_SECRET_NAME }}
+          CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS }}
+        run: |
+          set -euo pipefail
+
+          missing=0
+          auth_mode=""
+          has_oidc=false
+          has_azure_login=false
+
+          if [ -n "${CLIENT_ID}" ] && [ -n "${TENANT_ID}" ] && [ -n "${SUBSCRIPTION_ID}" ]; then
+            auth_mode="oidc"
+            has_oidc=true
+            has_azure_login=true
+          elif [ -n "${AZURE_CREDENTIALS}" ]; then
+            auth_mode="service-principal-json"
+            has_azure_login=true
+          elif [ -n "${PUBLISH_PROFILE}" ]; then
+            auth_mode="publish-profile"
+          fi
+
+          if [ -z "${auth_mode}" ]; then
+            echo "::error::${TARGET_ENV}: missing deploy authentication. Configure OIDC secrets (AZURE_CLIENT_ID/AZURE_TENANT_ID/AZURE_SUBSCRIPTION_ID), AZURE_CREDENTIALS, or publish profile secret."
+            missing=1
+          fi
+
+          if [ -z "${APP_NAME}" ] && [ -z "${APP_NAME_SECRET_NAME}" ]; then
+            echo "::error::${TARGET_ENV}: missing app name. Set AZURE_WEBAPP_NAME_STAGING/AZURE_WEBAPP_NAME or AZURE_WEBAPP_NAME_STAGING_SECRET_NAME/AZURE_WEBAPP_NAME_SECRET_NAME."
+            missing=1
+          fi
+
+          if [ -z "${KEY_VAULT_NAME}" ] && { [ -n "${APP_NAME_SECRET_NAME}" ] || [ -n "${PUBLISH_PROFILE_SECRET_NAME}" ]; }; then
+            echo "::error::${TARGET_ENV}: key vault secret name set without AZURE_KEY_VAULT_NAME."
+            missing=1
+          fi
+
+          if [ -n "${KEY_VAULT_NAME}" ] && [ "${has_azure_login}" = "false" ] && { [ -n "${APP_NAME_SECRET_NAME}" ] || [ -n "${PUBLISH_PROFILE_SECRET_NAME}" ]; }; then
+            echo "::error::${TARGET_ENV}: key vault secret resolution requires OIDC or AZURE_CREDENTIALS."
+            missing=1
+          fi
+
+          if [ "${missing}" -ne 0 ]; then
+            exit 1
+          fi
+
+          {
+            echo "### ${TARGET_ENV} readiness"
+            echo "- auth mode: \`${auth_mode}\`"
+            echo "- app name source: \`$([ -n "${APP_NAME}" ] && echo 'direct variable' || echo 'key vault secret')\`"
+            echo "- key vault configured: \`$([ -n "${KEY_VAULT_NAME}" ] && echo yes || echo no)\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  check-production:
+    name: Check Production Deployment Inputs
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Validate production wiring
+        env:
+          TARGET_ENV: production
+          APP_NAME: ${{ vars.AZURE_WEBAPP_NAME_PRODUCTION || vars.AZURE_WEBAPP_NAME }}
+          APP_NAME_SECRET_NAME: ${{ vars.AZURE_WEBAPP_NAME_PRODUCTION_SECRET_NAME || vars.AZURE_WEBAPP_NAME_SECRET_NAME }}
+          KEY_VAULT_NAME: ${{ vars.AZURE_KEY_VAULT_NAME }}
+          PUBLISH_PROFILE: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE_PRODUCTION || secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+          PUBLISH_PROFILE_SECRET_NAME: ${{ vars.AZURE_WEBAPP_PUBLISH_PROFILE_PRODUCTION_SECRET_NAME || vars.AZURE_WEBAPP_PUBLISH_PROFILE_SECRET_NAME }}
+          CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS }}
+        run: |
+          set -euo pipefail
+
+          missing=0
+          auth_mode=""
+          has_azure_login=false
+
+          if [ -n "${CLIENT_ID}" ] && [ -n "${TENANT_ID}" ] && [ -n "${SUBSCRIPTION_ID}" ]; then
+            auth_mode="oidc"
+            has_azure_login=true
+          elif [ -n "${AZURE_CREDENTIALS}" ]; then
+            auth_mode="service-principal-json"
+            has_azure_login=true
+          elif [ -n "${PUBLISH_PROFILE}" ]; then
+            auth_mode="publish-profile"
+          fi
+
+          if [ -z "${auth_mode}" ]; then
+            echo "::error::${TARGET_ENV}: missing deploy authentication. Configure OIDC secrets (AZURE_CLIENT_ID/AZURE_TENANT_ID/AZURE_SUBSCRIPTION_ID), AZURE_CREDENTIALS, or publish profile secret."
+            missing=1
+          fi
+
+          if [ -z "${APP_NAME}" ] && [ -z "${APP_NAME_SECRET_NAME}" ]; then
+            echo "::error::${TARGET_ENV}: missing app name. Set AZURE_WEBAPP_NAME_PRODUCTION/AZURE_WEBAPP_NAME or AZURE_WEBAPP_NAME_PRODUCTION_SECRET_NAME/AZURE_WEBAPP_NAME_SECRET_NAME."
+            missing=1
+          fi
+
+          if [ -z "${KEY_VAULT_NAME}" ] && { [ -n "${APP_NAME_SECRET_NAME}" ] || [ -n "${PUBLISH_PROFILE_SECRET_NAME}" ]; }; then
+            echo "::error::${TARGET_ENV}: key vault secret name set without AZURE_KEY_VAULT_NAME."
+            missing=1
+          fi
+
+          if [ -n "${KEY_VAULT_NAME}" ] && [ "${has_azure_login}" = "false" ] && { [ -n "${APP_NAME_SECRET_NAME}" ] || [ -n "${PUBLISH_PROFILE_SECRET_NAME}" ]; }; then
+            echo "::error::${TARGET_ENV}: key vault secret resolution requires OIDC or AZURE_CREDENTIALS."
+            missing=1
+          fi
+
+          if [ "${missing}" -ne 0 ]; then
+            exit 1
+          fi
+
+          {
+            echo "### ${TARGET_ENV} readiness"
+            echo "- auth mode: \`${auth_mode}\`"
+            echo "- app name source: \`$([ -n "${APP_NAME}" ] && echo 'direct variable' || echo 'key vault secret')\`"
+            echo "- key vault configured: \`$([ -n "${KEY_VAULT_NAME}" ] && echo yes || echo no)\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  check-observability:
+    name: Check Observability Inputs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate observability wiring
+        env:
+          PRODUCTION_BASE_URL: ${{ vars.PRODUCTION_BASE_URL }}
+          DEFAULT_HOSTNAME_SUFFIX: ${{ vars.AZURE_WEBAPP_DEFAULT_HOSTNAME_SUFFIX || env.DEFAULT_WEBAPP_HOSTNAME_SUFFIX }}
+          ALERT_EMAIL_WEBHOOK_URL: ${{ secrets.ALERT_EMAIL_WEBHOOK_URL }}
+          TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "${PRODUCTION_BASE_URL}" ]; then
+            echo "::error::Missing PRODUCTION_BASE_URL repository variable. Operations observability probes will be degraded."
+            exit 1
+          fi
+
+          {
+            echo "### Observability readiness"
+            echo "- production base url configured: \`yes\`"
+            echo "- default hostname suffix: \`${DEFAULT_HOSTNAME_SUFFIX}\`"
+            echo "- teams alert webhook configured: \`$([ -n "${TEAMS_WEBHOOK_URL}" ] && echo yes || echo no)\`"
+            echo "- email alert webhook configured: \`$([ -n "${ALERT_EMAIL_WEBHOOK_URL}" ] && echo yes || echo no)\`"
+          } >> "$GITHUB_STEP_SUMMARY"
