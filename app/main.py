@@ -394,7 +394,8 @@ def create_custody_envelope():
     except FileExistsError:
         return jsonify({"status": "error", "message": "Custody envelope already exists."}), 409
     except (FileNotFoundError, ValueError) as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 400
+        app.logger.warning("Custody envelope create rejected: %s", exc)
+        return jsonify({"status": "error", "message": "Custody envelope request was invalid."}), 400
 
     return jsonify({
         "status": "created",
@@ -412,7 +413,8 @@ def get_custody_envelope(transaction_id):
     except FileNotFoundError:
         return jsonify({"status": "error", "message": "Custody envelope not found."}), 404
     except ValueError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 400
+        app.logger.warning("Custody envelope read rejected: %s", exc)
+        return jsonify({"status": "error", "message": "Custody envelope request was invalid."}), 400
     return jsonify({"status": "ok", "envelope": envelope}), 200
 
 
@@ -427,9 +429,14 @@ def ingest_custody_event():
     except FileNotFoundError:
         return jsonify({"status": "error", "message": "Custody envelope not found."}), 404
     except PermissionError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 403
+        app.logger.warning("Custody event rejected: %s", exc)
+        return jsonify({
+            "status": "error",
+            "message": "High-risk custody items require approval from at least two designated stewards.",
+        }), 403
     except ValueError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 400
+        app.logger.warning("Custody event rejected: %s", exc)
+        return jsonify({"status": "error", "message": "Custody event request was invalid."}), 400
 
     return jsonify({
         "status": "appended",

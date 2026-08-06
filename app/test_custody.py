@@ -55,13 +55,13 @@ class TestCustodyEndpoints(unittest.TestCase):
         self._db_file = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
         self._repo_dir = tempfile.TemporaryDirectory()
         os.environ["PAYMENTS_DB_PATH"] = self._db_file.name
-        os.environ["CUSTODY_REPO_ROOT"] = self._repo_dir.name
         os.environ["DOCUSIGN_HMAC_KEY"] = "custody-hmac-key"
         self._write_custody_support_files()
 
         importlib.reload(db)
         importlib.reload(safeguards)
         importlib.reload(custody)
+        custody.set_repo_root_for_testing(self._repo_dir.name)
         importlib.reload(main)
         safeguards.config.STEWARD_ALERT_EMAILS = [
             "steward-one@verdigrisbotanicanation.org",
@@ -75,8 +75,8 @@ class TestCustodyEndpoints(unittest.TestCase):
         Path(self._db_file.name).unlink(missing_ok=True)
         self._repo_dir.cleanup()
         os.environ.pop("PAYMENTS_DB_PATH", None)
-        os.environ.pop("CUSTODY_REPO_ROOT", None)
         os.environ.pop("DOCUSIGN_HMAC_KEY", None)
+        custody.set_repo_root_for_testing(None)
 
     def _write_custody_support_files(self):
         repo_root = Path(self._repo_dir.name)
@@ -151,7 +151,7 @@ class TestCustodyEndpoints(unittest.TestCase):
             ),
         )
         self.assertEqual(response.status_code, 400)
-        self.assertIn("authorized", response.get_json()["message"])
+        self.assertEqual(response.get_json()["message"], "Custody envelope request was invalid.")
 
     def test_high_risk_retrieval_requires_two_stewards(self):
         create_response = self.client.post(

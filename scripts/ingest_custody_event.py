@@ -1,6 +1,5 @@
 import argparse
 import json
-import os
 import sys
 from pathlib import Path
 
@@ -20,7 +19,6 @@ def main() -> int:
     args = parser.parse_args()
 
     repo_root = Path(__file__).resolve().parent.parent
-    os.environ.setdefault("CUSTODY_REPO_ROOT", str(repo_root))
     sys.path.insert(0, str(repo_root / "app"))
 
     import custody  # noqa: PLC0415

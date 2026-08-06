@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 from copy import deepcopy
 from datetime import datetime, timezone
@@ -16,6 +15,7 @@ from tempfile import NamedTemporaryFile
 import safeguards
 
 logger = logging.getLogger(__name__)
+_REPO_ROOT_OVERRIDE: Path | None = None
 
 _VALID_FILE_TOKEN = re.compile(r"^[A-Za-z0-9._-]+$")
 _VALID_DIRECTIONS = {"OUTBOUND", "INBOUND"}
@@ -38,10 +38,14 @@ _GOVERNANCE_REFERENCES = {
 
 
 def _repo_root() -> Path:
-    configured_root = os.environ.get("CUSTODY_REPO_ROOT")
-    if configured_root:
-        return Path(configured_root).resolve()
+    if _REPO_ROOT_OVERRIDE is not None:
+        return _REPO_ROOT_OVERRIDE
     return Path(__file__).resolve().parent.parent
+
+
+def set_repo_root_for_testing(repo_root: str | Path | None) -> None:
+    global _REPO_ROOT_OVERRIDE
+    _REPO_ROOT_OVERRIDE = Path(repo_root).resolve() if repo_root else None
 
 
 def _custody_root() -> Path:
