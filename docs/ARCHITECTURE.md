@@ -410,7 +410,7 @@ It is owned by and operated under the authority of VBTN. See `TRIBAL_GOVERNANCE.
 ### DocuSign
 - **Purpose:** Document execution
 - **Auth:** JWT (RSA keypair)
-- **Integration Key:** 54934ea2-813f-4288-8a8e-e09c293701ce
+- **Integration Key:** stored in `DOCUSIGN_INTEGRATION_KEY` env var
 - **Env vars:** `DOCUSIGN_INTEGRATION_KEY`, `DOCUSIGN_USER_ID`, `DOCUSIGN_PRIVATE_KEY`
 - **Docs:** `docs/DOCUSIGN_WORKFLOW.md`
 

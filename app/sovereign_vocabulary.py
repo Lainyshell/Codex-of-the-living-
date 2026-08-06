@@ -222,9 +222,9 @@ DICTIONARY: dict[str, dict] = {
         "domain": "Sovereign Governance",
         "definition": (
             "The DocuSign FedRAMP Enterprise environment used by VBTNT for legally "
-            "binding electronic document execution.  VBTNT Integration Key: "
-            "54934ea2-813f-4288-8a8e-e09c293701ce.  All envelopes executed herein "
-            "are sovereign government records."
+            "binding electronic document execution.  The integration key is stored in "
+            "the DOCUSIGN_INTEGRATION_KEY environment variable.  All envelopes executed "
+            "herein are sovereign government records."
         ),
         "authority": "VBTNT Sovereign Vocabulary Dictionary, First Edition, §5",
     },

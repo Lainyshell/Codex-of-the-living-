@@ -284,10 +284,7 @@ def _extract_envelope_recipient(body):
             if val:
                 tab_map[label] = val
 
-    recipient_address = (
-        signer.get("deliveryMethod")  # placeholder — overridden below
-        and None
-    ) or tab_map.get("address") or signer.get("address") or None
+    recipient_address = tab_map.get("address") or signer.get("address") or None
     recipient_city = tab_map.get("city") or signer.get("city") or None
     recipient_state = tab_map.get("state") or signer.get("state") or None
     recipient_zip = (
@@ -866,7 +863,7 @@ def _post_tribal_returns(
         if stripe_key_available:
             try:
                 cents = royalty_engine.amount_to_cents(item["amount"])
-                if cents >= royalty_engine._STRIPE_MINIMUM_CENTS:
+                if cents >= royalty_engine.STRIPE_MINIMUM_CENTS:
                     import stripe  # type: ignore[import-untyped]
                     stripe.api_key = os.environ["STRIPE_API_KEY"]
                     intent = stripe.PaymentIntent.create(

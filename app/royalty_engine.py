@@ -49,7 +49,7 @@ SOVEREIGN_FEE = Decimal("2.50")
 ENERGY_RETURN = Decimal("1.00")
 
 # Minimum Stripe PaymentIntent amount (USD cents) — Stripe rejects < $0.50
-_STRIPE_MINIMUM_CENTS = 50
+STRIPE_MINIMUM_CENTS = 50
 
 # ---------------------------------------------------------------------------
 # Return-type constants (matches tribal_returns.return_type column)
@@ -161,7 +161,8 @@ def calculate_tribal_returns(
 def amount_to_cents(amount_str: str) -> int:
     """
     Convert a Decimal string amount (USD) to integer cents (ROUND_HALF_UP).
-    Raises ValueError if the result is below the Stripe minimum.
+    Returns the integer cent value; callers should check against STRIPE_MINIMUM_CENTS
+    before submitting to Stripe.
     """
     cents = int(
         (Decimal(amount_str) * 100).to_integral_value(rounding=ROUND_HALF_UP)
