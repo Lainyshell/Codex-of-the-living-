@@ -17,6 +17,7 @@ from flask import Flask, Response, jsonify, request
 from flask_cors import CORS
 
 import config
+import custody
 import db
 import payments
 import remic
@@ -382,6 +383,62 @@ def get_shipping_import(batch_id):
     }), 200
 
 
+@app.route("/api/custody/envelopes", methods=["POST"])
+def create_custody_envelope():
+    body = request.get_json(silent=True)
+    if not body:
+        return jsonify({"status": "error", "message": "Request body must be valid JSON"}), 400
+
+    try:
+        envelope = custody.create_envelope(body)
+    except FileExistsError:
+        return jsonify({"status": "error", "message": "Custody envelope already exists."}), 409
+    except (FileNotFoundError, ValueError) as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
+
+    return jsonify({
+        "status": "created",
+        "transaction_id": envelope["transaction_id"],
+        "custody_status": envelope["custody_status"],
+        "locker_facility_id": envelope["locker_facility_id"],
+        "event_count": len(envelope["events"]),
+    }), 201
+
+
+@app.route("/api/custody/envelopes/<transaction_id>")
+def get_custody_envelope(transaction_id):
+    try:
+        envelope = custody.get_envelope(transaction_id)
+    except FileNotFoundError:
+        return jsonify({"status": "error", "message": "Custody envelope not found."}), 404
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
+    return jsonify({"status": "ok", "envelope": envelope}), 200
+
+
+@app.route("/api/custody/events", methods=["POST"])
+def ingest_custody_event():
+    body = request.get_json(silent=True)
+    if not body:
+        return jsonify({"status": "error", "message": "Request body must be valid JSON"}), 400
+
+    try:
+        envelope = custody.ingest_event_payload(body)
+    except FileNotFoundError:
+        return jsonify({"status": "error", "message": "Custody envelope not found."}), 404
+    except PermissionError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 403
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
+
+    return jsonify({
+        "status": "appended",
+        "transaction_id": envelope["transaction_id"],
+        "custody_status": envelope["custody_status"],
+        "event_count": len(envelope["events"]),
+    }), 200
+
+
 # ---------------------------------------------------------------------------
 # Scan-based payment endpoint
 # ---------------------------------------------------------------------------
@@ -611,14 +668,7 @@ def docusign_webhook():
     recipient_name, recipient_email = _extract_envelope_recipient(body)
 
     # Find the corresponding transaction (if any)
-    txn = None
-    with db._conn() as con:
-        row = con.execute(
-            "SELECT * FROM transactions WHERE docusign_envelope_id = ?",
-            (envelope_id,),
-        ).fetchone()
-        if row:
-            txn = dict(row)
+    txn = db.get_transaction_by_docusign_envelope_id(envelope_id)
 
     proof_event = db.create_docusign_usps_proof_event(
         envelope_id=envelope_id,
@@ -630,36 +680,52 @@ def docusign_webhook():
         recipient_email=recipient_email,
         source_payload=body,
     )
+    custody_envelope = custody.append_docusign_event(
+        transaction_id=txn["id"] if txn else None,
+        envelope_id=envelope_id,
+        event_type=event_type or "unknown",
+        envelope_status=envelope_status,
+        payload=body,
+    )
 
     if event_type != "envelope-completed":
-        return jsonify({
+        response_payload = {
             "status": "accepted",
             "event": event_type,
             "envelope_id": envelope_id,
             "usps_reference": proof_event["usps_reference"],
             "proof_event_id": proof_event["id"],
-        }), 200
+        }
+        if custody_envelope:
+            response_payload["custody_status"] = custody_envelope["custody_status"]
+        return jsonify(response_payload), 200
 
     if not txn:
-        return jsonify({
+        response_payload = {
             "status": "tracked",
             "event": event_type,
             "envelope_id": envelope_id,
             "usps_reference": proof_event["usps_reference"],
             "proof_event_id": proof_event["id"],
             "message": "Envelope recorded for USPS proof without local transaction.",
-        }), 200
+        }
+        if custody_envelope:
+            response_payload["custody_status"] = custody_envelope["custody_status"]
+        return jsonify(response_payload), 200
 
     txn_id = txn["id"]
 
     if txn["status"] == "completed":
         # Idempotent — already processed
-        return jsonify({
+        response_payload = {
             "status": "already_completed",
             "transaction_id": txn_id,
             "usps_reference": proof_event["usps_reference"],
             "proof_event_id": proof_event["id"],
-        }), 200
+        }
+        if custody_envelope:
+            response_payload["custody_status"] = custody_envelope["custody_status"]
+        return jsonify(response_payload), 200
 
     db.update_transaction_status(txn_id, "completed")
     db.append_audit_event(txn_id, "envelope_completed", {
@@ -668,13 +734,16 @@ def docusign_webhook():
         "raw_status": body.get("status"),
     })
 
-    return jsonify({
+    response_payload = {
         "status": "completed",
         "transaction_id": txn_id,
         "envelope_id": envelope_id,
         "usps_reference": proof_event["usps_reference"],
         "proof_event_id": proof_event["id"],
-    }), 200
+    }
+    if custody_envelope:
+        response_payload["custody_status"] = custody_envelope["custody_status"]
+    return jsonify(response_payload), 200
 
 
 @app.route("/api/usps-proof/<envelope_id>")

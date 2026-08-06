@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://verdigrisbotanicanation.org/schema/custody/envelope.schema.json",
+  "title": "VBTN Custody Envelope",
+  "description": "VBTN SOVEREIGN SYSTEM - USPS Smart Locker Chain of Custody",
+  "type": "object",
+  "required": [
+    "transaction_id",
+    "location_id",
+    "direction",
+    "item_description",
+    "ship_method",
+    "destination",
+    "custody_status",
+    "locker_facility_id",
+    "locker_name",
+    "locker_address",
+    "locker_city",
+    "locker_state",
+    "locker_zip",
+    "sovereign_metadata",
+    "events"
+  ],
+  "properties": {
+    "transaction_id": {
+      "type": "string"
+    },
+    "location_id": {
+      "type": "string"
+    },
+    "direction": {
+      "type": "string",
+      "enum": ["OUTBOUND", "INBOUND"]
+    },
+    "item_description": {
+      "type": "string"
+    },
+    "ship_method": {
+      "type": "string",
+      "const": "USPS Smart Locker"
+    },
+    "destination": {
+      "type": "string"
+    },
+    "custody_status": {
+      "type": "string",
+      "enum": ["PENDING", "IN_LOCKER", "RETRIEVED", "CLOSED"]
+    },
+    "locker_facility_id": {
+      "type": "string"
+    },
+    "locker_name": {
+      "type": "string"
+    },
+    "locker_address": {
+      "type": "string"
+    },
+    "locker_city": {
+      "type": "string"
+    },
+    "locker_state": {
+      "type": "string"
+    },
+    "locker_zip": {
+      "type": "string"
+    },
+    "sovereign_metadata": {
+      "type": "string"
+    },
+    "events": {
+      "type": "array"
+    }
+  }
+}

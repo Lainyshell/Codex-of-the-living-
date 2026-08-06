@@ -36,6 +36,7 @@ app/remic.py @Lainyshell
 
 # Deployment and CI/CD workflows
 .github/workflows/ @Lainyshell
+.github/workflows/custody-event-ingest.yml @Lainyshell
 
 # Governance and legal documents (require full stewardship review)
 TRIBAL_GOVERNANCE.md @Lainyshell
@@ -44,3 +45,6 @@ JURISDICTION.md @Lainyshell
 docs/GOVERNANCE_CHARTER.md @Lainyshell
 docs/CRITICAL_CHANGE_PROTOCOL.md @Lainyshell
 legal/ @Lainyshell
+
+# Custody chain-of-custody domain
+custody/ @Lainyshell

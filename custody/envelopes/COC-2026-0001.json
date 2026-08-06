@@ -1,0 +1,52 @@
+{
+  "transaction_id": "COC-2026-0001",
+  "location_id": "VBTN-001",
+  "direction": "OUTBOUND",
+  "item_description": "Tribal ID Card — Physical Card Delivery",
+  "ship_method": "USPS Smart Locker",
+  "destination": "Recipient Pickup",
+  "custody_status": "IN_LOCKER",
+  "locker_facility_id": "1578794",
+  "locker_name": "OWENSBORO KY SDC",
+  "locker_address": "2970 FAIRVIEW DR",
+  "locker_city": "OWENSBORO",
+  "locker_state": "KY",
+  "locker_zip": "42303",
+  "locker_distance_miles": 0.0,
+  "locker_dimensions": {
+    "small": "5x5x18",
+    "medium": "11x8x18",
+    "large": "15x12x18"
+  },
+  "sovereign_metadata": "vbtn1.onmicrosoft.us",
+  "governance_documents": {
+    "tribal_governance": "TRIBAL_GOVERNANCE.md",
+    "jurisdiction": "JURISDICTION.md",
+    "governance_charter": "docs/GOVERNANCE_CHARTER.md",
+    "critical_change_protocol": "docs/CRITICAL_CHANGE_PROTOCOL.md",
+    "data_sovereignty": "legal/DATA_SOVEREIGNTY_AGREEMENT.md"
+  },
+  "created_at": "2026-02-10T10:00:00+00:00",
+  "updated_at": "2026-02-10T14:30:00+00:00",
+  "events": [
+    {
+      "timestamp": "2026-02-10T10:00:00+00:00",
+      "actor": "SYSTEM",
+      "action": "CREATED",
+      "resulting_status": "PENDING",
+      "details": {
+        "source": "bootstrap"
+      }
+    },
+    {
+      "timestamp": "2026-02-10T14:30:00+00:00",
+      "actor": "MAILROOM_STEWARD",
+      "action": "PLACED_IN_LOCKER",
+      "resulting_status": "IN_LOCKER",
+      "details": {
+        "locker_facility_id": "1578794",
+        "locker_id": "A12"
+      }
+    }
+  ]
+}

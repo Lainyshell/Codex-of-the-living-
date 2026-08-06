@@ -214,6 +214,15 @@ def get_transaction_by_id(txn_id: str) -> dict | None:
     return dict(row) if row else None
 
 
+def get_transaction_by_docusign_envelope_id(envelope_id: str) -> dict | None:
+    with _conn() as con:
+        row = con.execute(
+            "SELECT * FROM transactions WHERE docusign_envelope_id = ?",
+            (envelope_id,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
 def update_transaction_status(
     txn_id: str,
     status: str,

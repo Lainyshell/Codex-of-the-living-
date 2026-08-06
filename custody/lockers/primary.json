@@ -1,0 +1,32 @@
+[
+  {
+    "location_id": "VBTN-001",
+    "facility_id": "1578794",
+    "locker_name": "OWENSBORO KY SDC",
+    "address": "2970 FAIRVIEW DR",
+    "city": "OWENSBORO",
+    "state": "KY",
+    "zip": "42303",
+    "distance_miles": 0.0,
+    "dimensions": {
+      "small": "5x5x18",
+      "medium": "11x8x18",
+      "large": "15x12x18"
+    }
+  },
+  {
+    "location_id": "VBTN-ESTATE-001",
+    "facility_id": "1578794",
+    "locker_name": "OWENSBORO KY SDC",
+    "address": "2970 FAIRVIEW DR",
+    "city": "OWENSBORO",
+    "state": "KY",
+    "zip": "42303",
+    "distance_miles": 6.2,
+    "dimensions": {
+      "small": "5x5x18",
+      "medium": "11x8x18",
+      "large": "15x12x18"
+    }
+  }
+]

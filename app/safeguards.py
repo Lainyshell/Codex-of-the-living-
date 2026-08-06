@@ -30,11 +30,18 @@ from email.mime.text import MIMEText
 from functools import wraps
 from typing import Callable
 
-from flask import g, jsonify, request
+from flask import g, has_app_context, has_request_context, jsonify, request
 
 import config
 
 logger = logging.getLogger(__name__)
+_HIGH_RISK_CUSTODY_KEYWORDS = (
+    "stipend",
+    "trust",
+    "payroll",
+    "emergency kit",
+)
+_HIGH_RISK_CUSTODY_STATUSES = {"RETRIEVED", "CLOSED"}
 
 # ── Lockdown State ────────────────────────────────────────────────────────────
 # Thread-safe lockdown flag. Requires collective steward approval to clear.
@@ -62,11 +69,18 @@ AUTH_FAILURE_WINDOW_SECONDS = 5 * 60  # 5 minutes
 
 def _record_abuse_event(pattern: str, details: dict) -> dict:
     """Record an abuse event and return the event dict."""
+    request_ip = "unknown"
+    session_id = "unknown"
+    if has_request_context():
+        request_ip = request.remote_addr or "unknown"
+    if has_app_context():
+        session_id = getattr(g, "session_id", "unknown")
+
     event = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "pattern": pattern,
-        "ip": request.remote_addr if request else "unknown",
-        "session_id": getattr(g, "session_id", "unknown") if g else "unknown",
+        "ip": request_ip,
+        "session_id": session_id,
         "details": details,
     }
     with _abuse_log_lock:
@@ -132,6 +146,12 @@ def _dispatch_abuse_alert(pattern: str, event: dict) -> None:
         f"Review: docs/ABUSE_DETECTION_RUNBOOK.md\n"
         f"Policy: docs/PROHIBITED_USES.md\n"
     )
+    thread = threading.Thread(target=_send_steward_alerts, args=(subject, body), daemon=True)
+    thread.start()
+
+
+def _dispatch_incident_alert(subject: str, body: str) -> None:
+    """Dispatch a non-abuse incident alert to all configured stewards."""
     thread = threading.Thread(target=_send_steward_alerts, args=(subject, body), daemon=True)
     thread.start()
 
@@ -315,6 +335,74 @@ def assert_governance_references_intact() -> None:
         "SAFEGUARD: Governance references intact — Nation=%s Trust=%s",
         config.GOVERNING_NATION,
         config.GOVERNING_TRUST,
+    )
+
+
+def is_high_risk_custody_item(item_description: str) -> bool:
+    """Return True when the item description requires heightened custody review."""
+    if not item_description:
+        return False
+    normalized = item_description.casefold()
+    return any(keyword in normalized for keyword in _HIGH_RISK_CUSTODY_KEYWORDS)
+
+
+def enforce_custody_status_transition(
+    *,
+    item_description: str,
+    target_status: str | None,
+    actor: str,
+    steward_approvals: list[str] | None = None,
+    transaction_id: str | None = None,
+) -> None:
+    """
+    Enforce multi-steward approval and incident logging for high-risk custody closes.
+    """
+    if not target_status:
+        return
+
+    normalized_status = target_status.strip().upper()
+    if normalized_status not in _HIGH_RISK_CUSTODY_STATUSES:
+        return
+    if not is_high_risk_custody_item(item_description):
+        return
+
+    steward_approvals = steward_approvals or []
+    valid_approvals = {
+        approval.strip()
+        for approval in steward_approvals
+        if isinstance(approval, str)
+        and approval.strip()
+        and approval.strip() in config.STEWARD_ALERT_EMAILS
+    }
+    details = {
+        "transaction_id": transaction_id,
+        "item_description": item_description,
+        "target_status": normalized_status,
+        "actor": actor,
+        "steward_approvals": sorted(valid_approvals),
+        "required_approvals": 2,
+    }
+
+    if len(valid_approvals) < 2:
+        event = _record_abuse_event("HIGH_RISK_CUSTODY_APPROVAL_MISSING", details)
+        _dispatch_abuse_alert("HIGH_RISK_CUSTODY_APPROVAL_MISSING", event)
+        raise PermissionError(
+            "High-risk custody items require approval from at least two designated stewards."
+        )
+
+    incident = _record_abuse_event("HIGH_RISK_CUSTODY_TRANSITION", details)
+    _dispatch_incident_alert(
+        "HIGH-RISK CUSTODY STATUS CHANGE",
+        (
+            "Verdigris Botanica Tribal Nation — Custody Incident Log\n\n"
+            f"Transaction: {transaction_id or 'unknown'}\n"
+            f"Item:        {item_description}\n"
+            f"Status:      {normalized_status}\n"
+            f"Actor:       {actor}\n"
+            f"Approvals:   {sorted(valid_approvals)}\n"
+            f"Logged:      {incident['timestamp']}\n\n"
+            "This change was recorded as an incident-grade custody event."
+        ),
     )
 
 

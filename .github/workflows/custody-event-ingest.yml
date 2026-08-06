@@ -1,0 +1,56 @@
+name: Custody Event Ingest
+
+on:
+  workflow_dispatch:
+    inputs:
+      event_json:
+        description: JSON payload matching the custody event contract
+        required: true
+        type: string
+  repository_dispatch:
+    types:
+      - custody_event
+
+jobs:
+  append-custody-event:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Append custody event
+        env:
+          WORKFLOW_EVENT_JSON: ${{ github.event.inputs.event_json }}
+          DISPATCH_EVENT_JSON: ${{ toJson(github.event.client_payload) }}
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          payload = os.environ.get("WORKFLOW_EVENT_JSON") or os.environ.get("DISPATCH_EVENT_JSON", "")
+          Path("/tmp/custody-event.json").write_text(payload, encoding="utf-8")
+          PY
+          python scripts/ingest_custody_event.py --event-file /tmp/custody-event.json
+
+      - name: Create custody update pull request
+        uses: peter-evans/create-pull-request@v7
+        with:
+          branch: automation/custody-event-${{ github.run_id }}
+          commit-message: "Append custody event from automation"
+          title: "Append custody event from automation"
+          body: |
+            ## Summary
+            - appended a validated custody event to `custody/envelopes/`
+            - enforced the primary locker map and custody schema before writing
+            - routed the change through pull request review for protected custody paths
+
+            ## Governance
+            - branch protection and required reviewers still apply in GitHub settings
