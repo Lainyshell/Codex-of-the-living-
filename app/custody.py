@@ -5,6 +5,7 @@ Append-only custody envelope storage and validation.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 from copy import deepcopy
@@ -13,6 +14,8 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 
 import safeguards
+
+logger = logging.getLogger(__name__)
 
 _VALID_FILE_TOKEN = re.compile(r"^[A-Za-z0-9._-]+$")
 _VALID_DIRECTIONS = {"OUTBOUND", "INBOUND"}
@@ -234,10 +237,13 @@ def find_envelope_by_docusign_envelope_id(docusign_envelope_id: str) -> dict | N
     if not docusign_envelope_id:
         return None
     for path in _envelopes_dir().glob("*.json"):
-        payload = _load_json(path)
-        if payload.get("docusign_envelope_id") == docusign_envelope_id:
-            validate_envelope_document(payload)
-            return payload
+        try:
+            payload = _load_json(path)
+            if payload.get("docusign_envelope_id") == docusign_envelope_id:
+                validate_envelope_document(payload)
+                return payload
+        except (json.JSONDecodeError, ValueError) as exc:
+            logger.warning("Skipping invalid custody envelope %s: %s", path.name, exc)
     return None
 
 
