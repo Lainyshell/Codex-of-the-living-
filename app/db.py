@@ -296,6 +296,16 @@ def get_transaction_by_id(txn_id: str) -> dict | None:
     return dict(row) if row else None
 
 
+def get_transactions_by_status(status: str) -> list[dict]:
+    """Return all transactions whose status matches *status*."""
+    with _conn() as con:
+        rows = con.execute(
+            "SELECT * FROM transactions WHERE status = ? ORDER BY created_at",
+            (status,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
 def get_transaction_by_docusign_envelope_id(envelope_id: str) -> dict | None:
     with _conn() as con:
         row = con.execute(

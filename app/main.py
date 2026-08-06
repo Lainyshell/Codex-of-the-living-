@@ -1303,5 +1303,72 @@ def get_sovereign_vocabulary():
 
 
 
+# ---------------------------------------------------------------------------
+# Batch settlement — settle all obligations for signed envelopes
+# ---------------------------------------------------------------------------
+
+@app.route("/api/settle-signed-envelopes", methods=["POST"])
+def settle_signed_envelopes():
+    """
+    Reconcile all outstanding ``docusign_sent`` transactions by querying
+    DocuSign for the current envelope status.  For each envelope whose status
+    is ``completed`` the transaction is marked ``completed`` and an audit event
+    is appended, matching the logic executed by the ``/api/docusign-webhook``
+    endpoint when it receives an ``envelope-completed`` event.
+
+    Returns a JSON summary:
+        settled   list of transaction IDs that were just settled
+        skipped   list of transaction IDs whose envelopes are not yet completed
+        failed    list of {transaction_id, error} entries for any lookup errors
+    """
+    pending = db.get_transactions_by_status("docusign_sent")
+
+    settled: list[str] = []
+    skipped: list[str] = []
+    failed: list[dict] = []
+
+    for txn in pending:
+        txn_id = txn["id"]
+        envelope_id = txn.get("docusign_envelope_id")
+
+        if not envelope_id:
+            skipped.append(txn_id)
+            continue
+
+        try:
+            envelope_info = payments.get_docusign_envelope_status(envelope_id)
+        except RuntimeError:
+            app.logger.error(
+                "settle_signed_envelopes: failed to fetch status for "
+                "envelope %s (txn %s)",
+                envelope_id, txn_id,
+            )
+            failed.append({"transaction_id": txn_id, "error": "DocuSign status lookup failed. Check server logs."})
+            continue
+
+        if envelope_info.get("status") != "completed":
+            skipped.append(txn_id)
+            continue
+
+        db.update_transaction_status(txn_id, "completed")
+        db.append_audit_event(txn_id, "envelope_completed", {
+            "envelope_id": envelope_id,
+            "docusign_event": "envelope-completed",
+            "raw_status": "completed",
+            "source": "settle-signed-envelopes",
+        })
+        settled.append(txn_id)
+
+    return jsonify({
+        "status": "ok",
+        "settled": settled,
+        "skipped": skipped,
+        "failed": failed,
+        "settled_count": len(settled),
+        "skipped_count": len(skipped),
+        "failed_count": len(failed),
+    }), 200
+
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0")

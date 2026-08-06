@@ -551,5 +551,163 @@ class TestHmacVerification(unittest.TestCase):
         self.assertFalse(verify_docusign_hmac(body, sig, "wrong-key"))
 
 
+# ===========================================================================
+# Settle-signed-envelopes endpoint tests
+# ===========================================================================
+
+class TestSettleSignedEnvelopes(unittest.TestCase):
+
+    def setUp(self):
+        import importlib
+        import tempfile
+        self._tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        os.environ["PAYMENTS_DB_PATH"] = self._tmp.name
+        importlib.reload(db)
+        db.init_db()
+        import main
+        importlib.reload(main)
+        self.app = main.app.test_client()
+        self._main = main
+
+    def tearDown(self):
+        try:
+            os.unlink(self._tmp.name)
+        except OSError:
+            pass
+
+    def _seed_sent_txn(self, envelope_id: str, ikey: str) -> dict:
+        txn = db.create_transaction(
+            idempotency_key=ikey,
+            vendor_id="V1",
+            obligation_id="OBL1",
+            remic_class="A",
+            rate_type="gov_obligation",
+            principal="1000.00",
+            interest="10.00",
+            total="1010.00",
+            royalty_amount="0.00",
+        )
+        db.update_transaction_status(txn["id"], "docusign_sent", docusign_envelope_id=envelope_id)
+        return db.get_transaction_by_id(txn["id"])
+
+    @patch("payments.get_docusign_envelope_status")
+    def test_settles_completed_envelopes(self, mock_status):
+        txn = self._seed_sent_txn("env-settle-1", "ikey-settle-1")
+        mock_status.return_value = {"envelope_id": "env-settle-1", "status": "completed"}
+
+        resp = self.app.post("/api/settle-signed-envelopes")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertIn(txn["id"], data["settled"])
+        self.assertEqual(data["settled_count"], 1)
+        self.assertEqual(data["skipped_count"], 0)
+        updated = db.get_transaction_by_id(txn["id"])
+        self.assertEqual(updated["status"], "completed")
+
+    @patch("payments.get_docusign_envelope_status")
+    def test_skips_non_completed_envelopes(self, mock_status):
+        txn = self._seed_sent_txn("env-settle-2", "ikey-settle-2")
+        mock_status.return_value = {"envelope_id": "env-settle-2", "status": "sent"}
+
+        resp = self.app.post("/api/settle-signed-envelopes")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertIn(txn["id"], data["skipped"])
+        self.assertEqual(data["settled_count"], 0)
+        updated = db.get_transaction_by_id(txn["id"])
+        self.assertEqual(updated["status"], "docusign_sent")
+
+    @patch("payments.get_docusign_envelope_status")
+    def test_records_failed_lookups(self, mock_status):
+        txn = self._seed_sent_txn("env-settle-3", "ikey-settle-3")
+        mock_status.side_effect = RuntimeError("network error")
+
+        resp = self.app.post("/api/settle-signed-envelopes")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertEqual(data["failed_count"], 1)
+        self.assertEqual(data["failed"][0]["transaction_id"], txn["id"])
+        self.assertIn("DocuSign status lookup failed", data["failed"][0]["error"])
+        updated = db.get_transaction_by_id(txn["id"])
+        self.assertEqual(updated["status"], "docusign_sent")
+
+    @patch("payments.get_docusign_envelope_status")
+    def test_empty_when_no_pending(self, mock_status):
+        resp = self.app.post("/api/settle-signed-envelopes")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertEqual(data["settled_count"], 0)
+        self.assertEqual(data["skipped_count"], 0)
+        self.assertEqual(data["failed_count"], 0)
+        mock_status.assert_not_called()
+
+    @patch("payments.get_docusign_envelope_status")
+    def test_idempotent_already_completed(self, mock_status):
+        """Transactions already completed are not in docusign_sent; they are ignored."""
+        txn = self._seed_sent_txn("env-settle-4", "ikey-settle-4")
+        db.update_transaction_status(txn["id"], "completed")
+        mock_status.return_value = {"envelope_id": "env-settle-4", "status": "completed"}
+
+        resp = self.app.post("/api/settle-signed-envelopes")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertEqual(data["settled_count"], 0)
+        mock_status.assert_not_called()
+
+
+# ===========================================================================
+# db.get_transactions_by_status unit tests
+# ===========================================================================
+
+class TestGetTransactionsByStatus(unittest.TestCase):
+
+    def setUp(self):
+        import importlib
+        import tempfile
+        self._tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        os.environ["PAYMENTS_DB_PATH"] = self._tmp.name
+        importlib.reload(db)
+        db.init_db()
+
+    def tearDown(self):
+        try:
+            os.unlink(self._tmp.name)
+        except OSError:
+            pass
+
+    def _create_txn(self, ikey: str, status: str, envelope_id: str | None = None) -> dict:
+        txn = db.create_transaction(
+            idempotency_key=ikey,
+            vendor_id="V",
+            obligation_id="O",
+            remic_class="A",
+            rate_type="royalty",
+            principal="100.00",
+            interest="1.00",
+            total="101.00",
+            royalty_amount="0.00",
+        )
+        db.update_transaction_status(txn["id"], status, docusign_envelope_id=envelope_id)
+        return db.get_transaction_by_id(txn["id"])
+
+    def test_returns_matching_status(self):
+        t1 = self._create_txn("k1", "docusign_sent", "env-a")
+        self._create_txn("k2", "completed")
+        rows = db.get_transactions_by_status("docusign_sent")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["id"], t1["id"])
+
+    def test_empty_when_no_match(self):
+        self._create_txn("k3", "completed")
+        rows = db.get_transactions_by_status("docusign_sent")
+        self.assertEqual(rows, [])
+
+    def test_multiple_results(self):
+        self._create_txn("k4", "docusign_sent", "env-b")
+        self._create_txn("k5", "docusign_sent", "env-c")
+        rows = db.get_transactions_by_status("docusign_sent")
+        self.assertEqual(len(rows), 2)
+
+
 if __name__ == "__main__":
     unittest.main()

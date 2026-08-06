@@ -316,6 +316,40 @@ def send_docusign_envelope(
     return {"envelope_id": envelope_id, "status": result.status}
 
 
+def get_docusign_envelope_status(envelope_id: str) -> dict:
+    """
+    Fetch the current status of a DocuSign envelope from the REST API.
+
+    Returns a dict with at least:
+        envelope_id  str
+        status       str   (e.g. "completed", "sent", "delivered", "voided")
+    """
+    from docusign_esign import ApiClient, EnvelopesApi  # type: ignore[import-untyped]
+
+    account_id = _ds_env("DOCUSIGN_ACCOUNT_ID")
+    base_url = _ds_env("DOCUSIGN_BASE_URL")
+    access_token = _get_docusign_token()
+
+    api_client = ApiClient()
+    api_client.host = f"{base_url}/v2.1"
+    api_client.set_default_header("Authorization", f"******")
+
+    try:
+        envelope = EnvelopesApi(api_client).get_envelope(
+            account_id=account_id,
+            envelope_id=envelope_id,
+        )
+    except Exception as exc:
+        raise RuntimeError(
+            f"DocuSign get_envelope failed for {envelope_id!r}: {exc}"
+        ) from exc
+
+    return {
+        "envelope_id": envelope.envelope_id or envelope_id,
+        "status": envelope.status or "",
+    }
+
+
 # ---------------------------------------------------------------------------
 # Webhook signature verification
 # ---------------------------------------------------------------------------
