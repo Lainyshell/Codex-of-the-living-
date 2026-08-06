@@ -318,15 +318,15 @@ def send_docusign_envelope(
     return {"envelope_id": envelope_id, "status": result.status}
 
 
-def get_docusign_envelope_status(envelope_id: str) -> dict:
+def get_docusign_api_client() -> tuple:
     """
-    Fetch the current status of a DocuSign envelope from the REST API.
+    Return an authenticated ``(ApiClient, account_id)`` tuple.
 
-    Returns a dict with at least:
-        envelope_id  str
-        status       str   (e.g. "completed", "sent", "delivered", "voided")
+    Callers can use this instead of accessing the private helpers directly.
+    The API client's ``host`` is already set to ``{base_url}/v2.1`` and
+    the ``Authorization`` header is pre-populated.
     """
-    from docusign_esign import ApiClient, EnvelopesApi  # type: ignore[import-untyped]
+    from docusign_esign import ApiClient  # type: ignore[import-untyped]
 
     account_id = _ds_env("DOCUSIGN_ACCOUNT_ID")
     base_url = _ds_env("DOCUSIGN_BASE_URL")
@@ -335,6 +335,20 @@ def get_docusign_envelope_status(envelope_id: str) -> dict:
     api_client = ApiClient()
     api_client.host = f"{base_url}/v2.1"
     api_client.set_default_header("Authorization", f"******")
+    return api_client, account_id
+
+
+def get_docusign_envelope_status(envelope_id: str) -> dict:
+    """
+    Fetch the current status of a DocuSign envelope from the REST API.
+
+    Returns a dict with at least:
+        envelope_id  str
+        status       str   (e.g. "completed", "sent", "delivered", "voided")
+    """
+    from docusign_esign import EnvelopesApi  # type: ignore[import-untyped]
+
+    api_client, account_id = get_docusign_api_client()
 
     try:
         envelope = EnvelopesApi(api_client).get_envelope(

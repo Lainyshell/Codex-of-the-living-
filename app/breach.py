@@ -178,7 +178,7 @@ def _generate_followup_envelope(breach: dict, txn: dict | None) -> None:
 
     try:
         import payments
-        from docusign_esign import ApiClient, EnvelopesApi  # type: ignore[import-untyped]
+        from docusign_esign import EnvelopesApi  # type: ignore[import-untyped]
         from docusign_esign.models import (  # type: ignore[import-untyped]
             EnvelopeDefinition,
             Tabs,
@@ -186,9 +186,7 @@ def _generate_followup_envelope(breach: dict, txn: dict | None) -> None:
             Text,
         )
 
-        access_token = payments._get_docusign_token()
-        account_id = payments._ds_env("DOCUSIGN_ACCOUNT_ID")
-        base_url = payments._ds_env("DOCUSIGN_BASE_URL")
+        api_client, account_id = payments.get_docusign_api_client()
 
         tab_values = [
             Text(tab_label="transaction_id", value=txn["id"]),
@@ -218,9 +216,6 @@ def _generate_followup_envelope(breach: dict, txn: dict | None) -> None:
             ),
         )
 
-        api_client = ApiClient()
-        api_client.host = f"{base_url}/v2.1"
-        api_client.set_default_header("Authorization", f"******")
         result = EnvelopesApi(api_client).create_envelope(
             account_id=account_id,
             envelope_definition=envelope_def,

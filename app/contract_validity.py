@@ -107,9 +107,13 @@ def validate_contract(transaction_id: str) -> dict:
                 if sig_passed
                 else f"Envelope not yet completed (status={env_status!r})"
             )
-        except RuntimeError as exc:
+        except RuntimeError:
+            logger.warning(
+                "Could not retrieve DocuSign envelope status for envelope %s",
+                envelope_id,
+            )
             env_passed = False
-            env_detail = f"Could not retrieve envelope status: {exc}"
+            env_detail = "Could not retrieve envelope status (check server logs)"
             sig_passed = False
             sig_detail = "Could not verify signatures (envelope lookup failed)"
 

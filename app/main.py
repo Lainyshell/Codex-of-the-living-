@@ -796,7 +796,11 @@ def docusign_webhook():
             )
             breach_id = breach_record["id"]
         except Exception as _breach_exc:
-            pass  # breach logging is best-effort; do not fail the webhook
+            app.logger.warning(
+                "Breach handling failed for envelope %s: %s",
+                envelope_id,
+                _breach_exc,
+            )
 
     if event_type != "envelope-completed":
         response_payload = {
@@ -937,6 +941,7 @@ def _post_tribal_returns(
                             "transaction_id": txn["id"] if txn else "",
                             "envelope_status": envelope_status,
                             "source": "vbtnt_tribal_return",
+                            "jurisdiction": "VBTNT",
                         },
                         idempotency_key=(
                             f"tribal-return-{envelope_id}-"
