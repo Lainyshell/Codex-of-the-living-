@@ -64,6 +64,34 @@ CREATE TABLE IF NOT EXISTS audit_events (
     payload        TEXT NOT NULL,
     created_at     TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS shipping_import_batches (
+    id                TEXT PRIMARY KEY,
+    source_file       TEXT NOT NULL,
+    report_type       TEXT NOT NULL,
+    generated_at      TEXT NOT NULL,
+    transaction_count INTEGER NOT NULL,
+    total_amount      TEXT NOT NULL,
+    imported_at       TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS shipping_import_rows (
+    id                     TEXT PRIMARY KEY,
+    batch_id               TEXT NOT NULL,
+    line_number            INTEGER NOT NULL,
+    recipient              TEXT,
+    address                TEXT,
+    date_of_delivery       TEXT,
+    form_3811_number       TEXT,
+    certified_mail_number  TEXT,
+    registered_mail_number TEXT,
+    transaction_type       TEXT,
+    amount                 TEXT,
+    raw_amount             TEXT,
+    amount_valid           INTEGER NOT NULL,
+    source_reference       TEXT,
+    source_status          TEXT
+);
 """
 
 _VALID_STATUSES = frozenset({
@@ -220,3 +248,91 @@ def get_audit_trail(transaction_id: str) -> list[dict]:
             (transaction_id,),
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+def create_shipping_import(report: dict) -> dict:
+    batch_id = str(uuid.uuid4())
+    imported_at = _now()
+    transactions = report.get("transactions", [])
+
+    with _conn() as con:
+        con.execute(
+            """
+            INSERT INTO shipping_import_batches
+                (id, source_file, report_type, generated_at,
+                 transaction_count, total_amount, imported_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                batch_id,
+                report.get("source_file", ""),
+                report.get("report_type", "usps_shipping"),
+                report.get("generated_at", imported_at),
+                int(report.get("transaction_count", 0)),
+                str(report.get("total_amount", 0)),
+                imported_at,
+            ),
+        )
+
+        for row in transactions:
+            con.execute(
+                """
+                INSERT INTO shipping_import_rows
+                    (id, batch_id, line_number, recipient, address, date_of_delivery,
+                     form_3811_number, certified_mail_number, registered_mail_number,
+                     transaction_type, amount, raw_amount, amount_valid,
+                     source_reference, source_status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    str(uuid.uuid4()),
+                    batch_id,
+                    int(row.get("line_number", 0)),
+                    row.get("recipient"),
+                    row.get("address"),
+                    row.get("date_of_delivery"),
+                    row.get("form_3811_number"),
+                    row.get("certified_mail_number"),
+                    row.get("registered_mail_number"),
+                    row.get("transaction_type"),
+                    row.get("amount"),
+                    row.get("raw_amount"),
+                    1 if row.get("amount_valid") else 0,
+                    row.get("source_reference"),
+                    row.get("source_status"),
+                ),
+            )
+
+    return get_shipping_import_batch(batch_id)
+
+
+def get_shipping_import_batch(batch_id: str) -> dict | None:
+    with _conn() as con:
+        batch = con.execute(
+            "SELECT * FROM shipping_import_batches WHERE id = ?",
+            (batch_id,),
+        ).fetchone()
+        if not batch:
+            return None
+
+        rows = con.execute(
+            """
+            SELECT line_number, recipient, address, date_of_delivery, form_3811_number,
+                   certified_mail_number, registered_mail_number, transaction_type,
+                   amount, raw_amount, amount_valid, source_reference, source_status
+            FROM shipping_import_rows
+            WHERE batch_id = ?
+            ORDER BY line_number
+            """,
+            (batch_id,),
+        ).fetchall()
+
+    payload = dict(batch)
+    payload["transactions"] = [
+        {
+            **dict(row),
+            "amount_valid": bool(row["amount_valid"]),
+        }
+        for row in rows
+    ]
+    return payload

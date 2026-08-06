@@ -296,6 +296,56 @@ def get_shipping_report():
     }), 400
 
 
+@app.route("/api/shipping-import", methods=["POST"])
+def import_shipping_report():
+    body = request.get_json(silent=True) or {}
+    source_name = body.get("source") or request.args.get(
+        "source",
+        DEFAULT_SHIPPING_SOURCE.name,
+    )
+
+    try:
+        source_path = resolve_source_path(source_name)
+        report = build_shipping_report(source_path)
+        batch = db.create_shipping_import(report)
+    except ValueError:
+        return jsonify({"status": "error", "message": "Invalid shipping source request."}), 400
+    except FileNotFoundError:
+        return jsonify({"status": "error", "message": "Shipping source file was not found."}), 404
+
+    return jsonify({
+        "status": "imported",
+        "import_batch_id": batch["id"],
+        "source_file": batch["source_file"],
+        "report_type": batch["report_type"],
+        "generated_at": batch["generated_at"],
+        "imported_at": batch["imported_at"],
+        "transaction_count": batch["transaction_count"],
+        "total_amount": batch["total_amount"],
+    }), 201
+
+
+@app.route("/api/shipping-import/<batch_id>")
+def get_shipping_import(batch_id):
+    batch = db.get_shipping_import_batch(batch_id)
+    if batch is None:
+        return jsonify({"status": "error", "message": "Import batch not found."}), 404
+
+    return jsonify({
+        "status": "ok",
+        "import_batch": {
+            "id": batch["id"],
+            "source_file": batch["source_file"],
+            "report_type": batch["report_type"],
+            "generated_at": batch["generated_at"],
+            "imported_at": batch["imported_at"],
+            "transaction_count": batch["transaction_count"],
+            "total_amount": batch["total_amount"],
+        },
+        "transactions": batch["transactions"],
+    }), 200
+
+
 # ---------------------------------------------------------------------------
 # Scan-based payment endpoint
 # ---------------------------------------------------------------------------
