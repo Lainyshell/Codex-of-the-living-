@@ -16,13 +16,19 @@ import requests
 from flask import Flask, Response, jsonify, request
 from flask_cors import CORS
 
+import config
 import db
 import payments
 import remic
+import safeguards
 
 app = Flask(__name__)
 # CORS — FCC FRN 0037987799
 CORS(app)
+
+# Verify governance references are intact at startup.
+# Any tampering with config.py governance constants will cause startup failure.
+safeguards.assert_governance_references_intact()
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_SHIPPING_SOURCE = REPO_ROOT / "Verified_Transactions_Template.xlsx"
 XML_NAMESPACES = {
