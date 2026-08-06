@@ -2,6 +2,7 @@ import csv
 import io
 import json
 import re
+import sqlite3
 import zipfile
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
@@ -15,13 +16,19 @@ import requests
 from flask import Flask, Response, jsonify, request
 from flask_cors import CORS
 
+import config
 import db
 import payments
 import remic
+import safeguards
 
 app = Flask(__name__)
 # CORS — FCC FRN 0037987799
 CORS(app)
+
+# Verify governance references are intact at startup.
+# Any tampering with config.py governance constants will cause startup failure.
+safeguards.assert_governance_references_intact()
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_SHIPPING_SOURCE = REPO_ROOT / "Verified_Transactions_Template.xlsx"
 XML_NAMESPACES = {
@@ -226,6 +233,33 @@ def build_shipping_report_csv(report):
     writer.writerows(report["transactions"])
     return output.getvalue()
 
+
+def _extract_envelope_event_timestamp(body):
+    return (
+        body.get("eventDateTime")
+        or body.get("generatedDateTime")
+        or body.get("data", {}).get("eventDateTime")
+        or body.get("data", {}).get("generatedDateTime")
+    )
+
+
+def _extract_envelope_recipient(body):
+    if not isinstance(body, dict):
+        return None, None
+
+    data = body.get("data", {})
+    recipient_name = (
+        body.get("recipientName")
+        or data.get("recipientName")
+        or body.get("recipient", {}).get("name", "")
+    )
+    recipient_email = (
+        body.get("recipientEmail")
+        or data.get("recipientEmail")
+        or body.get("recipient", {}).get("email", "")
+    )
+    return recipient_name or None, recipient_email or None
+
 # Initialise the database on startup
 db.init_db()
 
@@ -294,6 +328,58 @@ def get_shipping_report():
         "status": "error",
         "message": "Unsupported format. Use json or csv.",
     }), 400
+
+
+@app.route("/api/shipping-import", methods=["POST"])
+def import_shipping_report():
+    body = request.get_json(silent=True) or {}
+    source_name = body.get("source") or request.args.get(
+        "source",
+        DEFAULT_SHIPPING_SOURCE.name,
+    )
+
+    try:
+        source_path = resolve_source_path(source_name)
+        report = build_shipping_report(source_path)
+        batch = db.create_shipping_import(report)
+    except ValueError:
+        return jsonify({"status": "error", "message": "Invalid shipping source request."}), 400
+    except FileNotFoundError:
+        return jsonify({"status": "error", "message": "Shipping source file was not found."}), 404
+    except sqlite3.DatabaseError:
+        return jsonify({"status": "error", "message": "Shipping import persistence failed."}), 500
+
+    return jsonify({
+        "status": "imported",
+        "import_batch_id": batch["id"],
+        "source_file": batch["source_file"],
+        "report_type": batch["report_type"],
+        "generated_at": batch["generated_at"],
+        "imported_at": batch["imported_at"],
+        "transaction_count": batch["transaction_count"],
+        "total_amount": batch["total_amount"],
+    }), 201
+
+
+@app.route("/api/shipping-import/<batch_id>")
+def get_shipping_import(batch_id):
+    batch = db.get_shipping_import_batch(batch_id)
+    if batch is None:
+        return jsonify({"status": "error", "message": "Import batch not found."}), 404
+
+    return jsonify({
+        "status": "ok",
+        "import_batch": {
+            "id": batch["id"],
+            "source_file": batch["source_file"],
+            "report_type": batch["report_type"],
+            "generated_at": batch["generated_at"],
+            "imported_at": batch["imported_at"],
+            "transaction_count": batch["transaction_count"],
+            "total_amount": batch["total_amount"],
+        },
+        "transactions": batch["transactions"],
+    }), 200
 
 
 # ---------------------------------------------------------------------------
@@ -516,30 +602,64 @@ def docusign_webhook():
         or body.get("data", {}).get("envelopeId")
     )
     event_type = body.get("event", "")
+    envelope_status = body.get("status") or body.get("data", {}).get("status")
 
     if not envelope_id:
         return jsonify({"error": "envelopeId not found in payload"}), 400
 
-    if event_type != "envelope-completed":
-        # Accept but take no action for non-completion events
-        return jsonify({"status": "accepted", "event": event_type}), 200
+    event_timestamp = _extract_envelope_event_timestamp(body)
+    recipient_name, recipient_email = _extract_envelope_recipient(body)
 
-    # Find the corresponding transaction
+    # Find the corresponding transaction (if any)
+    txn = None
     with db._conn() as con:
         row = con.execute(
             "SELECT * FROM transactions WHERE docusign_envelope_id = ?",
             (envelope_id,),
         ).fetchone()
+        if row:
+            txn = dict(row)
 
-    if not row:
-        return jsonify({"error": f"No transaction found for envelope {envelope_id}"}), 404
+    proof_event = db.create_docusign_usps_proof_event(
+        envelope_id=envelope_id,
+        event_type=event_type or "unknown",
+        envelope_status=envelope_status,
+        event_timestamp=event_timestamp,
+        transaction_id=txn["id"] if txn else None,
+        recipient_name=recipient_name,
+        recipient_email=recipient_email,
+        source_payload=body,
+    )
 
-    txn = dict(row)
+    if event_type != "envelope-completed":
+        return jsonify({
+            "status": "accepted",
+            "event": event_type,
+            "envelope_id": envelope_id,
+            "usps_reference": proof_event["usps_reference"],
+            "proof_event_id": proof_event["id"],
+        }), 200
+
+    if not txn:
+        return jsonify({
+            "status": "tracked",
+            "event": event_type,
+            "envelope_id": envelope_id,
+            "usps_reference": proof_event["usps_reference"],
+            "proof_event_id": proof_event["id"],
+            "message": "Envelope recorded for USPS proof without local transaction.",
+        }), 200
+
     txn_id = txn["id"]
 
     if txn["status"] == "completed":
         # Idempotent — already processed
-        return jsonify({"status": "already_completed", "transaction_id": txn_id}), 200
+        return jsonify({
+            "status": "already_completed",
+            "transaction_id": txn_id,
+            "usps_reference": proof_event["usps_reference"],
+            "proof_event_id": proof_event["id"],
+        }), 200
 
     db.update_transaction_status(txn_id, "completed")
     db.append_audit_event(txn_id, "envelope_completed", {
@@ -552,7 +672,17 @@ def docusign_webhook():
         "status": "completed",
         "transaction_id": txn_id,
         "envelope_id": envelope_id,
+        "usps_reference": proof_event["usps_reference"],
+        "proof_event_id": proof_event["id"],
     }), 200
+
+
+@app.route("/api/usps-proof/<envelope_id>")
+def get_usps_proof(envelope_id):
+    events = db.list_docusign_usps_proof_events(envelope_id)
+    if not events:
+        return jsonify({"status": "error", "message": "No USPS proof events found."}), 404
+    return jsonify({"status": "ok", "envelope_id": envelope_id, "events": events}), 200
 
 
 if __name__ == "__main__":

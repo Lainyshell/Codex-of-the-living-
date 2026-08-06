@@ -48,6 +48,35 @@ class TestShippingReportEndpoint(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.get_json()["status"], "error")
 
+    def test_shipping_import_persists_normalized_transactions(self):
+        response = self.client.post(
+            "/api/shipping-import",
+            json={"source": "Schedule_Q_Disbursement_Ledger___Issue_001.csv"},
+        )
+
+        self.assertEqual(response.status_code, 201)
+        payload = response.get_json()
+        self.assertEqual(payload["status"], "imported")
+        self.assertEqual(payload["source_file"], "Schedule_Q_Disbursement_Ledger___Issue_001.csv")
+        self.assertEqual(payload["transaction_count"], 4)
+
+        batch_response = self.client.get(
+            f"/api/shipping-import/{payload['import_batch_id']}"
+        )
+        self.assertEqual(batch_response.status_code, 200)
+        batch_payload = batch_response.get_json()
+        self.assertEqual(batch_payload["import_batch"]["transaction_count"], 4)
+        self.assertEqual(batch_payload["transactions"][0]["recipient"], "Alaina Padgett")
+        self.assertTrue(batch_payload["transactions"][0]["amount_valid"])
+
+    def test_shipping_import_rejects_out_of_repo_paths(self):
+        response = self.client.post(
+            "/api/shipping-import",
+            json={"source": "../README.md"},
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json()["status"], "error")
+
 
 class TestShippingReportHelper(unittest.TestCase):
     def test_parse_decimal_handles_supported_and_invalid_values(self):

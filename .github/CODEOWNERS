@@ -1,8 +1,46 @@
 `# CODEOWNERS — Verdigris Botanica Tribal Nation (VBTN)
-# Repository administrator and primary review authority:
-#   Alaina Padgett, Admin — alaina@verdigrisbotanicanation.org
+# Governance: docs/GOVERNANCE_CHARTER.md
+# Critical Change Protocol: docs/CRITICAL_CHANGE_PROTOCOL.md
 #
-# All changes to any file in this repository require approval from the
-# designated tribal administrator before merging.
+# Authority is shared across the stewardship body, not any single individual.
+# Roles: System Steward | Tribal Technical Lead | Elder Council Seat
+#
+# Current assignments:
+#   System Steward:        Alaina Padgett (@Lainyshell) — alaina@verdigrisbotanicanation.org
+#   Tribal Technical Lead: [To be designated — add @handle here]
+#   Elder Council Seat:    [To be designated — add @handle here]
+#
+# Until all roles are filled, @Lainyshell must approve all changes.
+# When roles are filled, update this file via Critical Change Protocol.
 
+# Default: all files require System Steward approval
 * @Lainyshell
+
+# ── CRITICAL PATHS ────────────────────────────────────────────────────────────
+# These paths require multi-steward approval per docs/CRITICAL_CHANGE_PROTOCOL.md
+# Add the @handles for Tribal Technical Lead and Elder Council Seat when designated.
+
+# Database schema and migrations
+app/db.py @Lainyshell
+app/schema/ @Lainyshell
+**/migrations/ @Lainyshell
+
+# Authentication, IAM, and security configuration
+app/config.py @Lainyshell
+app/auth/ @Lainyshell
+app/safeguards.py @Lainyshell
+
+# Payment and financial integrations
+app/payments.py @Lainyshell
+app/remic.py @Lainyshell
+
+# Deployment and CI/CD workflows
+.github/workflows/ @Lainyshell
+
+# Governance and legal documents (require full stewardship review)
+TRIBAL_GOVERNANCE.md @Lainyshell
+JURISDICTION.md @Lainyshell
+.github/CODEOWNERS @Lainyshell
+docs/GOVERNANCE_CHARTER.md @Lainyshell
+docs/CRITICAL_CHANGE_PROTOCOL.md @Lainyshell
+legal/ @Lainyshell
