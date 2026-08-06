@@ -254,6 +254,11 @@ def create_shipping_import(report: dict) -> dict:
     batch_id = str(uuid.uuid4())
     imported_at = _now()
     transactions = report.get("transactions", [])
+    source_file = report.get("source_file", "")
+    report_type = report.get("report_type", "usps_shipping")
+    generated_at = report.get("generated_at", imported_at)
+    transaction_count = len(transactions)
+    total_amount = str(report.get("total_amount", 0))
 
     with _conn() as con:
         con.execute(
@@ -265,16 +270,18 @@ def create_shipping_import(report: dict) -> dict:
             """,
             (
                 batch_id,
-                report.get("source_file", ""),
-                report.get("report_type", "usps_shipping"),
-                report.get("generated_at", imported_at),
-                int(report.get("transaction_count", 0)),
-                str(report.get("total_amount", 0)),
+                source_file,
+                report_type,
+                generated_at,
+                transaction_count,
+                total_amount,
                 imported_at,
             ),
         )
 
         for row in transactions:
+            amount = row.get("amount")
+            raw_amount = row.get("raw_amount")
             con.execute(
                 """
                 INSERT INTO shipping_import_rows
@@ -295,15 +302,24 @@ def create_shipping_import(report: dict) -> dict:
                     row.get("certified_mail_number"),
                     row.get("registered_mail_number"),
                     row.get("transaction_type"),
-                    row.get("amount"),
-                    row.get("raw_amount"),
+                    str(amount) if amount is not None else None,
+                    str(raw_amount) if raw_amount is not None else None,
                     1 if row.get("amount_valid") else 0,
                     row.get("source_reference"),
                     row.get("source_status"),
                 ),
             )
 
-    return get_shipping_import_batch(batch_id)
+    return {
+        "id": batch_id,
+        "source_file": source_file,
+        "report_type": report_type,
+        "generated_at": generated_at,
+        "transaction_count": transaction_count,
+        "total_amount": total_amount,
+        "imported_at": imported_at,
+        "transactions": transactions,
+    }
 
 
 def get_shipping_import_batch(batch_id: str) -> dict | None:
@@ -317,7 +333,7 @@ def get_shipping_import_batch(batch_id: str) -> dict | None:
 
         rows = con.execute(
             """
-            SELECT line_number, recipient, address, date_of_delivery, form_3811_number,
+            SELECT id, line_number, recipient, address, date_of_delivery, form_3811_number,
                    certified_mail_number, registered_mail_number, transaction_type,
                    amount, raw_amount, amount_valid, source_reference, source_status
             FROM shipping_import_rows

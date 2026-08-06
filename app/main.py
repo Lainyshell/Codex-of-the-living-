@@ -2,6 +2,7 @@ import csv
 import io
 import json
 import re
+import sqlite3
 import zipfile
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
@@ -312,6 +313,8 @@ def import_shipping_report():
         return jsonify({"status": "error", "message": "Invalid shipping source request."}), 400
     except FileNotFoundError:
         return jsonify({"status": "error", "message": "Shipping source file was not found."}), 404
+    except sqlite3.DatabaseError:
+        return jsonify({"status": "error", "message": "Shipping import persistence failed."}), 500
 
     return jsonify({
         "status": "imported",
