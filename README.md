@@ -162,6 +162,7 @@ Builds a USPS-style shipping report from repository transaction data.
 The repository uses a single production app deployment workflow:
 
 - **Release workflow**: `.github/workflows/azure-container-webapp.yml`
+- **Go-live preflight workflow**: `.github/workflows/go-live-readiness.yml`
 - **Observability workflow**: `.github/workflows/operations-observability.yml`
 - **Mailbox provisioning workflow**: `.github/workflows/provision-tenant-mailboxes.yml`
 - **Deployment/operations standard**: [`docs/DEPLOYMENT_OPERATIONS_STANDARD.md`](docs/DEPLOYMENT_OPERATIONS_STANDARD.md)
