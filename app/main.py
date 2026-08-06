@@ -17,6 +17,8 @@ from flask import Flask, Response, jsonify, request
 from flask_cors import CORS
 
 import config
+import breach
+import contract_validity
 import custody
 import db
 import payments
@@ -779,6 +781,23 @@ def docusign_webhook():
         recipient_address=recipient_address,
     )
 
+    # ── Breach auto-trigger ──
+    breach_id = None
+    breach_type = breach.detect_breach_from_event(
+        transaction_id=txn["id"] if txn else None,
+        envelope_status=envelope_status,
+    )
+    if breach_type and txn:
+        try:
+            breach_record = breach.handle_breach(
+                transaction_id=txn["id"],
+                breach_type=breach_type,
+                details={"envelope_id": envelope_id, "event_type": event_type},
+            )
+            breach_id = breach_record["id"]
+        except Exception as _breach_exc:
+            pass  # breach logging is best-effort; do not fail the webhook
+
     if event_type != "envelope-completed":
         response_payload = {
             "status": "accepted",
@@ -794,6 +813,8 @@ def docusign_webhook():
             response_payload["cod_transaction_id"] = cod_id
         if custody_envelope:
             response_payload["custody_status"] = custody_envelope["custody_status"]
+        if breach_id:
+            response_payload["breach_id"] = breach_id
         return jsonify(response_payload), 200
 
     if not txn:
@@ -812,6 +833,8 @@ def docusign_webhook():
             response_payload["cod_transaction_id"] = cod_id
         if custody_envelope:
             response_payload["custody_status"] = custody_envelope["custody_status"]
+        if breach_id:
+            response_payload["breach_id"] = breach_id
         return jsonify(response_payload), 200
 
     txn_id = txn["id"]
@@ -831,6 +854,8 @@ def docusign_webhook():
             response_payload["cod_transaction_id"] = cod_id
         if custody_envelope:
             response_payload["custody_status"] = custody_envelope["custody_status"]
+        if breach_id:
+            response_payload["breach_id"] = breach_id
         return jsonify(response_payload), 200
 
     db.update_transaction_status(txn_id, "completed")
@@ -854,6 +879,8 @@ def docusign_webhook():
         response_payload["cod_transaction_id"] = cod_id
     if custody_envelope:
         response_payload["custody_status"] = custody_envelope["custody_status"]
+    if breach_id:
+        response_payload["breach_id"] = breach_id
     return jsonify(response_payload), 200
 
 
@@ -1367,6 +1394,87 @@ def settle_signed_envelopes():
         "settled_count": len(settled),
         "skipped_count": len(skipped),
         "failed_count": len(failed),
+    }), 200
+
+
+# ---------------------------------------------------------------------------
+# Contract Enforcement API
+# ---------------------------------------------------------------------------
+
+
+@app.route("/api/contracts/<transaction_id>/status")
+def get_contract_status(transaction_id):
+    """
+    Run the Contract Validity Engine for *transaction_id*.
+
+    Returns a JSON validity report with five checks:
+      envelope_status, signature_complete, usps_proof,
+      payment_complete, metadata_integrity.
+
+    ``valid`` is ``true`` only when all five checks pass.
+    Every response is tagged with ``jurisdiction = VBTNT``.
+    """
+    report = contract_validity.validate_contract(transaction_id)
+    status_code = 200 if report.get("valid") else 422
+    return jsonify({"status": "ok", "report": report}), status_code
+
+
+@app.route("/api/contracts/<transaction_id>/evidence")
+def get_contract_evidence(transaction_id):
+    """
+    Return an audit-ready evidence bundle for *transaction_id*.
+
+    Includes:
+      - The transaction record
+      - Full audit trail
+      - USPS proof events
+      - Custody envelope (if any)
+      - Contract breaches (if any)
+    """
+    txn = db.get_transaction_by_id(transaction_id)
+    if not txn:
+        return jsonify({"status": "error", "message": "Contract not found."}), 404
+
+    audit_trail = db.get_audit_trail(transaction_id)
+
+    envelope_id = txn.get("docusign_envelope_id")
+    usps_events = db.list_docusign_usps_proof_events(envelope_id) if envelope_id else []
+
+    custody_env = None
+    if envelope_id:
+        custody_env = custody.find_envelope_by_docusign_envelope_id(envelope_id)
+
+    breaches = db.list_contract_breaches(transaction_id)
+
+    return jsonify({
+        "status": "ok",
+        "jurisdiction": "VBTNT",
+        "transaction_id": transaction_id,
+        "transaction": txn,
+        "audit_trail": audit_trail,
+        "usps_proof_events": usps_events,
+        "custody_envelope": custody_env,
+        "breaches": breaches,
+    }), 200
+
+
+@app.route("/api/contracts/<transaction_id>/returns")
+def get_contract_returns(transaction_id):
+    """
+    Return all tribal economic return records for *transaction_id*.
+    """
+    txn = db.get_transaction_by_id(transaction_id)
+    if not txn:
+        return jsonify({"status": "error", "message": "Contract not found."}), 404
+
+    envelope_id = txn.get("docusign_envelope_id")
+    records = db.list_tribal_returns(envelope_id) if envelope_id else []
+
+    return jsonify({
+        "status": "ok",
+        "jurisdiction": "VBTNT",
+        "transaction_id": transaction_id,
+        "tribal_returns": records,
     }), 200
 
 

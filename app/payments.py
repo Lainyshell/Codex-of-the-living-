@@ -94,6 +94,7 @@ def create_stripe_payment(
             "remic_class": remic_class,
             "interest_amount": interest_amount,
             "docusign_template": docusign_template,
+            "jurisdiction": "VBTNT",
         },
         idempotency_key=idempotency_key,
     )
@@ -274,6 +275,7 @@ def send_docusign_envelope(
         Text(tab_label="vendor_id", value=vendor_id),
         Text(tab_label="obligation_id", value=obligation_id),
         Text(tab_label="transaction_id", value=transaction_id),
+        Text(tab_label="jurisdiction", value="VBTNT"),
     ]
 
     template_roles = [

@@ -154,6 +154,7 @@ CREATE TABLE IF NOT EXISTS docusign_usps_proof_events (
     recipient_state     TEXT,
     recipient_zip       TEXT,
     recipient_phone     TEXT,
+    jurisdiction        TEXT NOT NULL DEFAULT 'VBTNT',
     source_payload      TEXT NOT NULL,
     created_at          TEXT NOT NULL,
     UNIQUE(envelope_id, event_type, event_timestamp)
@@ -169,6 +170,16 @@ CREATE TABLE IF NOT EXISTS tribal_returns (
     stripe_payment_id TEXT,
     posted_at        TEXT,
     created_at       TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS contract_breaches (
+    id              TEXT PRIMARY KEY,
+    transaction_id  TEXT NOT NULL,
+    breach_type     TEXT NOT NULL,
+    penalty_amount  TEXT,
+    details         TEXT NOT NULL,
+    jurisdiction    TEXT NOT NULL DEFAULT 'VBTNT',
+    created_at      TEXT NOT NULL
 );
 """
 
@@ -229,6 +240,11 @@ def init_db() -> None:
                 con.execute(
                     f"ALTER TABLE docusign_usps_proof_events ADD COLUMN {col} TEXT"
                 )
+        if "jurisdiction" not in proof_columns:
+            con.execute(
+                "ALTER TABLE docusign_usps_proof_events "
+                "ADD COLUMN jurisdiction TEXT NOT NULL DEFAULT 'VBTNT'"
+            )
         # Migrate: add updated_at to insurance_claims if absent
         ic_columns = {
             row["name"]
@@ -524,8 +540,8 @@ def create_docusign_usps_proof_event(
                 (id, envelope_id, event_type, envelope_status, event_timestamp,
                  transaction_id, usps_reference, recipient_name, recipient_email,
                  recipient_address, recipient_city, recipient_state, recipient_zip,
-                 recipient_phone, source_payload, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 recipient_phone, jurisdiction, source_payload, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'VBTNT', ?, ?)
             """,
             (
                 str(uuid.uuid4()),
@@ -566,7 +582,7 @@ def list_docusign_usps_proof_events(envelope_id: str) -> list[dict]:
             SELECT id, envelope_id, event_type, envelope_status, event_timestamp,
                    transaction_id, usps_reference, recipient_name, recipient_email,
                    recipient_address, recipient_city, recipient_state, recipient_zip,
-                   recipient_phone, created_at
+                   recipient_phone, jurisdiction, created_at
             FROM docusign_usps_proof_events
             WHERE envelope_id = ?
             ORDER BY event_timestamp, created_at
@@ -882,3 +898,76 @@ def list_policies() -> list[dict]:
             "SELECT * FROM policies ORDER BY created_at DESC LIMIT 200"
         ).fetchall()
     return [dict(row) for row in rows]
+
+
+# ---------------------------------------------------------------------------
+# Contract breaches
+# ---------------------------------------------------------------------------
+
+
+def log_contract_breach(
+    *,
+    transaction_id: str,
+    breach_type: str,
+    penalty_amount: str | None,
+    details: dict,
+) -> dict:
+    """
+    Persist a contract breach record.  Returns the created row as a dict.
+    """
+    record_id = str(uuid.uuid4())
+    now = _now()
+    with _conn() as con:
+        con.execute(
+            """
+            INSERT INTO contract_breaches
+                (id, transaction_id, breach_type, penalty_amount,
+                 details, jurisdiction, created_at)
+            VALUES (?, ?, ?, ?, ?, 'VBTNT', ?)
+            """,
+            (
+                record_id,
+                transaction_id,
+                breach_type,
+                penalty_amount,
+                json.dumps(details),
+                now,
+            ),
+        )
+    return get_contract_breach(record_id)
+
+
+def get_contract_breach(breach_id: str) -> dict | None:
+    with _conn() as con:
+        row = con.execute(
+            "SELECT * FROM contract_breaches WHERE id = ?", (breach_id,)
+        ).fetchone()
+    if not row:
+        return None
+    result = dict(row)
+    try:
+        result["details"] = json.loads(result["details"])
+    except (ValueError, TypeError):
+        pass
+    return result
+
+
+def list_contract_breaches(transaction_id: str) -> list[dict]:
+    with _conn() as con:
+        rows = con.execute(
+            """
+            SELECT * FROM contract_breaches
+            WHERE transaction_id = ?
+            ORDER BY created_at
+            """,
+            (transaction_id,),
+        ).fetchall()
+    results = []
+    for row in rows:
+        record = dict(row)
+        try:
+            record["details"] = json.loads(record["details"])
+        except (ValueError, TypeError):
+            pass
+        results.append(record)
+    return results
