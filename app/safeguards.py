@@ -221,12 +221,9 @@ def check_export_limit(record_count: int, size_bytes: int = 0) -> bool:
         while tracker and tracker[0][0] < window_start:
             tracker.popleft()
 
-        # Sum records in window (including this request)
-        records_in_window = sum(r for _, r in tracker) + record_count
-        bytes_in_window = sum(b for _, _, b in (
-            (t, r, b) for t, r, *rest in tracker
-            for b in (rest[0] if rest else 0,)
-        )) + size_bytes
+        # Sum records and bytes in window (including this request)
+        records_in_window = sum(r for _, r, _ in tracker) + record_count
+        bytes_in_window = sum(b for _, _, b in tracker) + size_bytes
 
         if (
             records_in_window > config.ABUSE_MASS_EXPORT_RECORD_THRESHOLD

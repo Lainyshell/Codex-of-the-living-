@@ -130,7 +130,7 @@ Working with tribal legal counsel, draft the Trust Indenture covering:
 
 ---
 
-*This proposal should be read alongside the existing `TRustIndenture.pdf`, `TRVMasterTrustAndFundingAgreement.pdf`, and `BylawsofVerdigrisBotanicaEstate.pdf` to ensure alignment with existing VBTN trust instruments.*
+*This proposal should be read alongside the existing `TrustIndenture.pdf`, `TRVMasterTrustAndFundingAgreement.pdf`, and `BylawsofVerdigrisBotanicaEstate.pdf` to ensure alignment with existing VBTN trust instruments.*
 
 ---
 
