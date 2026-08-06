@@ -1126,7 +1126,7 @@ def create_insurance_claim():
             source_payload=body.get("source_payload") or body,
         )
     except ValueError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 400
+        return jsonify({"status": "error", "message": "Invalid claim data: check claim_status and required fields."}), 400
 
     return jsonify({"status": "created", "claim": record}), 201
 
@@ -1160,8 +1160,8 @@ def update_insurance_claim_status(claim_id):
             claim_status,
             payout_amount=str(body["payout_amount"]) if body.get("payout_amount") is not None else None,
         )
-    except ValueError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 400
+    except ValueError:
+        return jsonify({"status": "error", "message": "Invalid claim_status value."}), 400
     record = db.get_insurance_claim(claim_id)
     if record is None:
         return jsonify({"status": "error", "message": "Insurance claim not found."}), 404
@@ -1194,8 +1194,8 @@ def create_cod_transaction():
             status=body.get("status", "pending"),
             payment_channel=body.get("payment_channel"),
         )
-    except ValueError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 400
+    except ValueError:
+        return jsonify({"status": "error", "message": "Invalid COD transaction data: check status and required fields."}), 400
 
     return jsonify({"status": "created", "cod_transaction": record}), 201
 
@@ -1243,8 +1243,8 @@ def create_policy():
             insured_entity=body.get("insured_entity"),
             notes=body.get("notes"),
         )
-    except ValueError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 409
+    except ValueError:
+        return jsonify({"status": "error", "message": "Policy already exists with this policy_number."}), 409
 
     return jsonify({"status": "created", "policy": record}), 201
 
