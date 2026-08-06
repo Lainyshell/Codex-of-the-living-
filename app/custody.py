@@ -76,13 +76,30 @@ def _load_json(path: Path):
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _write_json(path: Path, payload: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as handle:
+def _assert_envelope_path(path: Path) -> Path:
+    resolved_dir = _envelopes_dir().resolve()
+    resolved_path = path.resolve(strict=False)
+    if resolved_path.parent != resolved_dir or resolved_path.suffix != ".json":
+        raise ValueError("Custody envelope path must stay within custody/envelopes")
+    return resolved_path
+
+
+def _load_envelope_json(path: Path) -> dict:
+    safe_path = _assert_envelope_path(path)
+    payload = json.loads(safe_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("Custody envelope must be a JSON object")
+    return payload
+
+
+def _write_envelope_json(path: Path, payload: dict) -> None:
+    safe_path = _assert_envelope_path(path)
+    safe_path.parent.mkdir(parents=True, exist_ok=True)
+    with NamedTemporaryFile("w", encoding="utf-8", dir=safe_path.parent, delete=False) as handle:
         handle.write(json.dumps(payload, indent=2))
         handle.write("\n")
         temp_name = handle.name
-    Path(temp_name).replace(path)
+    Path(temp_name).replace(safe_path)
 
 
 def _validate_identifier(value: str, field_name: str) -> str:
@@ -230,9 +247,7 @@ def get_envelope(transaction_id: str) -> dict:
     path = _envelope_path(transaction_id)
     if not path.exists():
         raise FileNotFoundError("Custody envelope was not found")
-    payload = _load_json(path)
-    if not isinstance(payload, dict):
-        raise ValueError("Custody envelope must be a JSON object")
+    payload = _load_envelope_json(path)
     validate_envelope_document(payload)
     return payload
 
@@ -242,7 +257,7 @@ def find_envelope_by_docusign_envelope_id(docusign_envelope_id: str) -> dict | N
         return None
     for path in _envelopes_dir().glob("*.json"):
         try:
-            payload = _load_json(path)
+            payload = _load_envelope_json(path)
             if payload.get("docusign_envelope_id") == docusign_envelope_id:
                 validate_envelope_document(payload)
                 return payload
@@ -307,7 +322,7 @@ def create_envelope(payload: dict) -> dict:
         raise FileExistsError("Custody envelope already exists")
 
     _ensure_structure()
-    _write_json(path, envelope)
+    _write_envelope_json(path, envelope)
     return envelope
 
 
@@ -346,7 +361,7 @@ def append_event(
     updated["updated_at"] = normalized_event["timestamp"]
 
     validate_envelope_document(updated)
-    _write_json(_envelope_path(updated["transaction_id"]), updated)
+    _write_envelope_json(_envelope_path(updated["transaction_id"]), updated)
     return updated
 
 
