@@ -447,6 +447,7 @@ class TestDocuSignWebhookEndpoint(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         data = resp.get_json()
         self.assertEqual(data["status"], "completed")
+        self.assertTrue(data["usps_reference"].startswith("USPS-PROOF-"))
         updated = db.get_transaction_by_id(txn["id"])
         self.assertEqual(updated["status"], "completed")
 
@@ -456,7 +457,10 @@ class TestDocuSignWebhookEndpoint(unittest.TestCase):
             "envelopeId": "env-any",
         })
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.get_json()["status"], "accepted")
+        data = resp.get_json()
+        self.assertEqual(data["status"], "accepted")
+        self.assertEqual(data["envelope_id"], "env-any")
+        self.assertTrue(data["usps_reference"].startswith("USPS-PROOF-"))
 
     def test_invalid_signature_rejected(self):
         body = json.dumps({"event": "envelope-completed", "envelopeId": "env-x"}).encode()
@@ -477,12 +481,16 @@ class TestDocuSignWebhookEndpoint(unittest.TestCase):
         )
         self.assertEqual(resp.status_code, 401)
 
-    def test_unknown_envelope_returns_404(self):
+    def test_unknown_envelope_completion_is_tracked(self):
         resp = self._signed_post({
             "event": "envelope-completed",
             "envelopeId": "env-does-not-exist",
         })
-        self.assertEqual(resp.status_code, 404)
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertEqual(data["status"], "tracked")
+        self.assertEqual(data["envelope_id"], "env-does-not-exist")
+        self.assertTrue(data["usps_reference"].startswith("USPS-PROOF-"))
 
     def test_idempotent_completion(self):
         txn = self._seed_transaction("env-idempotent-001")
@@ -493,6 +501,20 @@ class TestDocuSignWebhookEndpoint(unittest.TestCase):
         })
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.get_json()["status"], "already_completed")
+
+    def test_usps_proof_endpoint_returns_recorded_events(self):
+        self._signed_post({
+            "event": "envelope-sent",
+            "envelopeId": "env-proof-001",
+            "status": "sent",
+        })
+        resp = self.app.get("/api/usps-proof/env-proof-001")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertEqual(data["status"], "ok")
+        self.assertEqual(data["envelope_id"], "env-proof-001")
+        self.assertEqual(len(data["events"]), 1)
+        self.assertEqual(data["events"][0]["event_type"], "envelope-sent")
 
 
 # ===========================================================================

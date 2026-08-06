@@ -227,6 +227,31 @@ def build_shipping_report_csv(report):
     writer.writerows(report["transactions"])
     return output.getvalue()
 
+
+def _extract_envelope_event_timestamp(body):
+    return (
+        body.get("eventDateTime")
+        or body.get("generatedDateTime")
+        or body.get("data", {}).get("eventDateTime")
+        or body.get("data", {}).get("generatedDateTime")
+        or datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+    )
+
+
+def _extract_envelope_recipient(body):
+    data = body.get("data", {}) if isinstance(body, dict) else {}
+    recipient_name = (
+        body.get("recipientName")
+        or data.get("recipientName")
+        or body.get("recipient", {}).get("name", "")
+    )
+    recipient_email = (
+        body.get("recipientEmail")
+        or data.get("recipientEmail")
+        or body.get("recipient", {}).get("email", "")
+    )
+    return recipient_name or None, recipient_email or None
+
 # Initialise the database on startup
 db.init_db()
 
@@ -569,30 +594,64 @@ def docusign_webhook():
         or body.get("data", {}).get("envelopeId")
     )
     event_type = body.get("event", "")
+    envelope_status = body.get("status") or body.get("data", {}).get("status")
 
     if not envelope_id:
         return jsonify({"error": "envelopeId not found in payload"}), 400
 
-    if event_type != "envelope-completed":
-        # Accept but take no action for non-completion events
-        return jsonify({"status": "accepted", "event": event_type}), 200
+    event_timestamp = _extract_envelope_event_timestamp(body)
+    recipient_name, recipient_email = _extract_envelope_recipient(body)
 
-    # Find the corresponding transaction
+    # Find the corresponding transaction (if any)
+    txn = None
     with db._conn() as con:
         row = con.execute(
             "SELECT * FROM transactions WHERE docusign_envelope_id = ?",
             (envelope_id,),
         ).fetchone()
+        if row:
+            txn = dict(row)
 
-    if not row:
-        return jsonify({"error": f"No transaction found for envelope {envelope_id}"}), 404
+    proof_event = db.create_docusign_usps_proof_event(
+        envelope_id=envelope_id,
+        event_type=event_type or "unknown",
+        envelope_status=envelope_status,
+        event_timestamp=event_timestamp,
+        transaction_id=txn["id"] if txn else None,
+        recipient_name=recipient_name,
+        recipient_email=recipient_email,
+        source_payload=body,
+    )
 
-    txn = dict(row)
+    if event_type != "envelope-completed":
+        return jsonify({
+            "status": "accepted",
+            "event": event_type,
+            "envelope_id": envelope_id,
+            "usps_reference": proof_event["usps_reference"],
+            "proof_event_id": proof_event["id"],
+        }), 200
+
+    if not txn:
+        return jsonify({
+            "status": "tracked",
+            "event": event_type,
+            "envelope_id": envelope_id,
+            "usps_reference": proof_event["usps_reference"],
+            "proof_event_id": proof_event["id"],
+            "message": "Envelope recorded for USPS proof without local transaction.",
+        }), 200
+
     txn_id = txn["id"]
 
     if txn["status"] == "completed":
         # Idempotent — already processed
-        return jsonify({"status": "already_completed", "transaction_id": txn_id}), 200
+        return jsonify({
+            "status": "already_completed",
+            "transaction_id": txn_id,
+            "usps_reference": proof_event["usps_reference"],
+            "proof_event_id": proof_event["id"],
+        }), 200
 
     db.update_transaction_status(txn_id, "completed")
     db.append_audit_event(txn_id, "envelope_completed", {
@@ -605,7 +664,17 @@ def docusign_webhook():
         "status": "completed",
         "transaction_id": txn_id,
         "envelope_id": envelope_id,
+        "usps_reference": proof_event["usps_reference"],
+        "proof_event_id": proof_event["id"],
     }), 200
+
+
+@app.route("/api/usps-proof/<envelope_id>")
+def get_usps_proof(envelope_id):
+    events = db.list_docusign_usps_proof_events(envelope_id)
+    if not events:
+        return jsonify({"status": "error", "message": "No USPS proof events found."}), 404
+    return jsonify({"status": "ok", "envelope_id": envelope_id, "events": events}), 200
 
 
 if __name__ == "__main__":

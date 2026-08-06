@@ -92,6 +92,21 @@ CREATE TABLE IF NOT EXISTS shipping_import_rows (
     source_reference       TEXT,
     source_status          TEXT
 );
+
+CREATE TABLE IF NOT EXISTS docusign_usps_proof_events (
+    id               TEXT PRIMARY KEY,
+    envelope_id      TEXT NOT NULL,
+    event_type       TEXT NOT NULL,
+    envelope_status  TEXT,
+    event_timestamp  TEXT NOT NULL,
+    transaction_id   TEXT,
+    usps_reference   TEXT NOT NULL,
+    recipient_name   TEXT,
+    recipient_email  TEXT,
+    source_payload   TEXT NOT NULL,
+    created_at       TEXT NOT NULL,
+    UNIQUE(envelope_id, event_type, event_timestamp)
+);
 """
 
 _VALID_STATUSES = frozenset({
@@ -352,3 +367,72 @@ def get_shipping_import_batch(batch_id: str) -> dict | None:
         for row in rows
     ]
     return payload
+
+
+def create_docusign_usps_proof_event(
+    *,
+    envelope_id: str,
+    event_type: str,
+    envelope_status: str | None,
+    event_timestamp: str,
+    transaction_id: str | None,
+    recipient_name: str | None,
+    recipient_email: str | None,
+    source_payload: dict,
+) -> dict:
+    usps_reference = (
+        f"USPS-PROOF-{envelope_id[:12]}-{event_timestamp[:19]}"
+        .replace(":", "")
+        .replace("-", "")
+        .replace("T", "")
+    )
+    created_at = _now()
+
+    with _conn() as con:
+        con.execute(
+            """
+            INSERT OR IGNORE INTO docusign_usps_proof_events
+                (id, envelope_id, event_type, envelope_status, event_timestamp,
+                 transaction_id, usps_reference, recipient_name, recipient_email,
+                 source_payload, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                str(uuid.uuid4()),
+                envelope_id,
+                event_type,
+                envelope_status,
+                event_timestamp,
+                transaction_id,
+                usps_reference,
+                recipient_name,
+                recipient_email,
+                json.dumps(source_payload),
+                created_at,
+            ),
+        )
+        row = con.execute(
+            """
+            SELECT * FROM docusign_usps_proof_events
+            WHERE envelope_id = ? AND event_type = ? AND event_timestamp = ?
+            """,
+            (envelope_id, event_type, event_timestamp),
+        ).fetchone()
+
+    return dict(row) if row else {}
+
+
+def list_docusign_usps_proof_events(envelope_id: str) -> list[dict]:
+    with _conn() as con:
+        rows = con.execute(
+            """
+            SELECT id, envelope_id, event_type, envelope_status, event_timestamp,
+                   transaction_id, usps_reference, recipient_name, recipient_email,
+                   created_at
+            FROM docusign_usps_proof_events
+            WHERE envelope_id = ?
+            ORDER BY event_timestamp, created_at
+            """,
+            (envelope_id,),
+        ).fetchall()
+    return [dict(row) for row in rows]
